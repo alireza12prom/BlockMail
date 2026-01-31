@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { Email } from '../types';
-import { CONTRACT_ABI, CONTRACT_ADDRESS, HARDHAT_RPC_URL } from '../config/constants';
+import { CONTRACT_ABI, CONTRACT_ADDRESS, HARDHAT_WS_URL } from '../config/constants';
 import { shortenAddress } from '../utils/helpers';
 
 // Storage key for persisting connection
@@ -40,12 +40,15 @@ export function useWallet(
   // Connect to local Hardhat node
   const connectHardhat = useCallback(async (accountIndex: number) => {
     try {
-      const provider = new ethers.JsonRpcProvider(HARDHAT_RPC_URL, undefined, {
-        polling: true,
-        pollingInterval: 1000, // Poll every 1 second for new events
-      });
-      const signer = await provider.getSigner(accountIndex);
-      const address = await signer.getAddress();
+      // Use WebSocket provider for real-time event subscriptions
+      const provider = new ethers.WebSocketProvider(HARDHAT_WS_URL);
+      
+      // Get account from hardhat's default accounts
+      const accounts = await provider.send('eth_accounts', []);
+      const address = accounts[accountIndex];
+      
+      // Create a signer using the account
+      const signer = await provider.getSigner(address);
 
       const blockMail = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
 
@@ -61,8 +64,6 @@ export function useWallet(
       } as ConnectionInfo));
 
       showToast('Connected to Hardhat!', 'success');
-
-      // Listen for new incoming messages
     } catch (err) {
       console.error('Connection failed:', err);
       showToast('Failed to connect. Is Hardhat running?', 'error');
@@ -109,9 +110,14 @@ export function useWallet(
   }, [showToast]);
 
   // Disconnect
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback(async () => {
     if (contract) {
       contract.removeAllListeners();
+      // Close WebSocket connection if exists
+      const provider = contract.runner?.provider;
+      if (provider && 'destroy' in provider) {
+        await (provider as ethers.WebSocketProvider).destroy();
+      }
     }
     // Clear saved connection
     localStorage.removeItem(STORAGE_KEY);

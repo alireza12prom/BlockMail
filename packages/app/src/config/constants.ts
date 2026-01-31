@@ -56,8 +56,9 @@ export const CONTRACT_ABI = [
 // Contract address (Hardhat local deployment)
 export const CONTRACT_ADDRESS = '0x5FbDB2315678afecb367f032d93F642f64180aa3';
 
-// Hardhat RPC URL
+// Hardhat RPC URLs
 export const HARDHAT_RPC_URL = 'http://127.0.0.1:8545';
+export const HARDHAT_WS_URL = 'ws://127.0.0.1:8545';
 
 // Hardhat default accounts
 export const HARDHAT_ACCOUNTS: HardhatAccount[] = [

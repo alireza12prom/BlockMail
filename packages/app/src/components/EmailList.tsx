@@ -1,7 +1,7 @@
 import { Email } from '../types';
 import { shortenAddress, formatTime } from '../utils/helpers';
 import { HARDHAT_ACCOUNTS } from '../config/constants';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { ethers } from 'ethers';
 import { PinataSDK } from 'pinata';
 
@@ -18,9 +18,12 @@ const pinata = new PinataSDK({
 })
 
 
+const POLL_INTERVAL = 30; // seconds
+
 export function EmailList({ userAddress, contract, onEmailClick, newSentEmail }: EmailListProps) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [countdown, setCountdown] = useState(POLL_INTERVAL);
 
   // Immediately add sent email when passed from ComposeForm
   useEffect(() => {
@@ -34,56 +37,116 @@ export function EmailList({ userAddress, contract, onEmailClick, newSentEmail }:
     }
   }, [newSentEmail]);
 
+  // Track the last block we've seen to poll for new events
+  const lastBlockRef = useRef<number>(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Manual refresh function
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    
+    try {
+      const provider = contract.runner?.provider;
+      if (!provider) return;
+      
+      const currentBlock = await provider.getBlockNumber();
+      
+      // Query for ALL events (full reload)
+      const loadedEmails = await loadEmails(userAddress, contract);
+      setEmails(loadedEmails);
+      
+      lastBlockRef.current = currentBlock;
+      setCountdown(POLL_INTERVAL);
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Countdown timer
+  useEffect(() => {
+    const countdownInterval = setInterval(() => {
+      setCountdown(prev => (prev <= 1 ? POLL_INTERVAL : prev - 1));
+    }, 1000);
+
+    return () => clearInterval(countdownInterval);
+  }, []);
+
   useEffect(() => {
     setIsLoading(true);
+    let pollInterval: NodeJS.Timeout;
 
-    loadEmails(userAddress, contract)
-      .then(loadedEmails => {
-        setEmails(loadedEmails);
-        setIsLoading(false);
-      })
-      .catch(error => {
-        console.error('Error loading emails:', error);
-        setIsLoading(false);
-      });
-
-    // Handler for real-time messages
-    const handleMessage = async (from: string, to: string, cid: string, timestamp: bigint) => {
-      console.log('New Message event:', { from, to, cid, timestamp: timestamp.toString() });
-
-      // Check if this message involves the current user
-      const normalizedUser = userAddress.toLowerCase();
-      const isRecipient = to.toLowerCase() === normalizedUser;
-      const isSender = from.toLowerCase() === normalizedUser;
-
-      if (!isRecipient && !isSender) {
-        return; // Not relevant to this user
-      }
-
+    const pollForEvents = async () => {
       try {
-        // Fetch email content from Pinata
-        const email = await fetchEmailByCid(cid);
-        email.direction = isSender ? 'sent' : 'received';
+        const provider = contract.runner?.provider;
+        if (!provider) return;
+        
+        const currentBlock = await provider.getBlockNumber();
+        if (currentBlock <= lastBlockRef.current) return;
 
-        // Add to emails list (at the top, avoiding duplicates)
-        setEmails(prev => {
-          if (prev.some(e => e.cid === cid)) {
-            return prev; // Already exists
-          }
-          return [email, ...prev];
-        });
+        // Query for new events since last block
+        const filterToMe = contract.filters.Message(null, userAddress);
+        const filterFromMe = contract.filters.Message(userAddress, null);
+
+        const [eventsTo, eventsFrom] = await Promise.all([
+          contract.queryFilter(filterToMe, lastBlockRef.current + 1, currentBlock),
+          contract.queryFilter(filterFromMe, lastBlockRef.current + 1, currentBlock)
+        ]);
+
+        const newEvents = [...eventsTo, ...eventsFrom];
+        
+        for (const ev of newEvents) {
+          const args = (ev as any).args;
+          const cid = args.cid;
+          const from = args.from;
+
+          // Fetch and add new email
+          const email = await fetchEmailByCid(cid);
+          const isSender = from.toLowerCase() === userAddress.toLowerCase();
+          email.direction = isSender ? 'sent' : 'received';
+
+          setEmails(prev => {
+            if (prev.some(e => e.cid === cid)) return prev;
+            console.log('New email received:', email.subject);
+            return [email, ...prev];
+          });
+        }
+
+        lastBlockRef.current = currentBlock;
+        setCountdown(POLL_INTERVAL); // Reset countdown
       } catch (error) {
-        console.error('Failed to fetch new email:', error);
+        console.error('Polling error:', error);
       }
     };
 
-    // Attach listener
-    contract.on('Message', handleMessage);
-    console.log('Subscribed to Message events');
+    const init = async () => {
+      try {
+        // Load existing emails
+        const loadedEmails = await loadEmails(userAddress, contract);
+        setEmails(loadedEmails);
+        setIsLoading(false);
+
+        // Get current block number
+        const provider = contract.runner?.provider;
+        if (provider) {
+          lastBlockRef.current = await provider.getBlockNumber();
+        }
+
+        // Set up polling for new events
+        pollInterval = setInterval(pollForEvents, POLL_INTERVAL * 1000);
+
+      } catch (error) {
+        console.error('Error loading emails:', error);
+        setIsLoading(false);
+      }
+    };
+
+    init();
 
     return () => {
-      contract.off('Message', handleMessage);
-      console.log('Unsubscribed from Message events');
+      if (pollInterval) clearInterval(pollInterval);
     };
   }, [contract, userAddress]);
 
@@ -96,9 +159,26 @@ export function EmailList({ userAddress, contract, onEmailClick, newSentEmail }:
           <span className="w-1 h-5 bg-linear-to-b from-primary to-accent rounded-full" />
           Inbox
         </h2>
-        <span className="bg-linear-to-br from-primary to-accent text-white px-3 py-1 rounded-full text-xs font-semibold">
-          {emails.length}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50"
+            title="Refresh inbox"
+          >
+            <svg 
+              className={`w-4 h-4 text-slate-400 ${isRefreshing ? 'animate-spin' : ''}`} 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+          <span className="bg-linear-to-br from-primary to-accent text-white px-3 py-1 rounded-full text-xs font-semibold">
+            {emails.length}
+          </span>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin">
