@@ -170,8 +170,14 @@ function EmailItem({ email, onClick }: EmailItemProps) {
 
       <div className="flex justify-between items-center mb-1">
         <div className="flex items-center gap-2">
-          {email.direction === 'sent' && (
-            <span className="w-2 h-2 bg-primary rounded-full glow-primary" />
+          {email.direction === 'sent' ? (
+            <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+            </svg>
+          ): (
+            <svg className="w-4 h-4 text-primary-light" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
           )}
           <span className={`
             text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded
