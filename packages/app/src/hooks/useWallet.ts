@@ -1,8 +1,16 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { Email } from '../types';
 import { CONTRACT_ABI, CONTRACT_ADDRESS, HARDHAT_RPC_URL } from '../config/constants';
 import { shortenAddress } from '../utils/helpers';
+
+// Storage key for persisting connection
+const STORAGE_KEY = 'blockmail_connection';
+
+interface ConnectionInfo {
+  type: 'hardhat' | 'metamask';
+  accountIndex?: number;
+}
 
 interface UseWalletReturn {
   isConnected: boolean;
@@ -11,6 +19,7 @@ interface UseWalletReturn {
   networkName: string;
   emails: Email[];
   isLoadingMessages: boolean;
+  isReconnecting: boolean;
   connectHardhat: (accountIndex: number) => Promise<void>;
   connectMetaMask: () => Promise<void>;
   disconnect: () => void;
@@ -27,6 +36,8 @@ export function useWallet(
   const [networkName, setNetworkName] = useState('');
   const [emails, setEmails] = useState<Email[]>([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const hasAttemptedReconnect = useRef(false);
 
   // Load past messages from the blockchain
   const loadMessages = useCallback(async (blockMail: ethers.Contract, address: string) => {
@@ -102,6 +113,12 @@ export function useWallet(
       setNetworkName('Hardhat Local');
       setIsConnected(true);
 
+      // Save connection info for auto-reconnect
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ 
+        type: 'hardhat', 
+        accountIndex 
+      } as ConnectionInfo));
+
       showToast('Connected to Hardhat!', 'success');
 
       await loadMessages(blockMail, address);
@@ -157,6 +174,11 @@ export function useWallet(
       setNetworkName(network.name || `Chain ${network.chainId}`);
       setIsConnected(true);
 
+      // Save connection info for auto-reconnect
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ 
+        type: 'metamask' 
+      } as ConnectionInfo));
+
       showToast('Connected via MetaMask!', 'success');
 
       await loadMessages(blockMail, address);
@@ -171,12 +193,45 @@ export function useWallet(
     if (contract) {
       contract.removeAllListeners();
     }
+    // Clear saved connection
+    localStorage.removeItem(STORAGE_KEY);
+    
     setIsConnected(false);
     setContract(null);
     setUserAddress('');
     setNetworkName('');
     setEmails([]);
   }, [contract]);
+
+  // Auto-reconnect on mount
+  useEffect(() => {
+    if (hasAttemptedReconnect.current) return;
+    hasAttemptedReconnect.current = true;
+
+    const savedConnection = localStorage.getItem(STORAGE_KEY);
+    if (!savedConnection) return;
+
+    try {
+      const connectionInfo: ConnectionInfo = JSON.parse(savedConnection);
+      setIsReconnecting(true);
+
+      if (connectionInfo.type === 'hardhat' && connectionInfo.accountIndex !== undefined) {
+        connectHardhat(connectionInfo.accountIndex).finally(() => {
+          setIsReconnecting(false);
+        });
+      } else if (connectionInfo.type === 'metamask') {
+        connectMetaMask().finally(() => {
+          setIsReconnecting(false);
+        });
+      } else {
+        setIsReconnecting(false);
+      }
+    } catch (err) {
+      console.error('Failed to restore connection:', err);
+      localStorage.removeItem(STORAGE_KEY);
+      setIsReconnecting(false);
+    }
+  }, [connectHardhat, connectMetaMask]);
 
   // Add email
   const addEmail = useCallback((email: Email) => {
@@ -197,6 +252,7 @@ export function useWallet(
     networkName,
     emails,
     isLoadingMessages,
+    isReconnecting,
     connectHardhat,
     connectMetaMask,
     disconnect,

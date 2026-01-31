@@ -22,6 +22,7 @@ function App() {
     networkName,
     emails,
     isLoadingMessages,
+    isReconnecting,
     connectHardhat,
     connectMetaMask,
     disconnect,
@@ -68,7 +69,19 @@ function App() {
       />
 
       <main className="max-w-7xl mx-auto p-6 flex gap-6">
-        {!isConnected ? (
+        {isReconnecting ? (
+          /* Reconnecting State */
+          <div className="flex-1 flex items-center justify-center py-20">
+            <div className="text-center">
+              <div className="w-16 h-16 mb-6 mx-auto relative">
+                <div className="absolute inset-0 border-4 border-primary/20 rounded-full" />
+                <div className="absolute inset-0 border-4 border-transparent border-t-primary rounded-full animate-spin" />
+              </div>
+              <h2 className="text-xl font-semibold text-slate-200 mb-2">Reconnecting...</h2>
+              <p className="text-slate-400 text-sm">Restoring your previous session</p>
+            </div>
+          </div>
+        ) : !isConnected ? (
           <WelcomeScreen onConnect={() => setShowConnectModal(true)} />
         ) : (
           <>
