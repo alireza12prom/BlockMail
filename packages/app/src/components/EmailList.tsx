@@ -1,15 +1,93 @@
 import { Email } from '../types';
 import { shortenAddress, formatTime } from '../utils/helpers';
 import { HARDHAT_ACCOUNTS } from '../config/constants';
+import { useEffect, useState, useCallback } from 'react';
+import { ethers } from 'ethers';
+import { PinataSDK } from 'pinata';
 
 interface EmailListProps {
-  emails: Email[];
-  isLoading: boolean;
+  userAddress: string,
+  contract: ethers.Contract,
   onEmailClick: (email: Email) => void;
+  newSentEmail?: Email | null;
 }
 
-export function EmailList({ emails, isLoading, onEmailClick }: EmailListProps) {
-  const unreadCount = emails.filter(e => !e.read).length;
+const pinata = new PinataSDK({
+  pinataJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI5NDFmNTA5Ni0zY2M0LTRjNDItOTUyMC1mM2NmNmUxNjA3MjQiLCJlbWFpbCI6ImFsaXJlemEucmV6YXBvdXIubWVAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBpbl9wb2xpY3kiOnsicmVnaW9ucyI6W3siZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiRlJBMSJ9LHsiZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiTllDMSJ9XSwidmVyc2lvbiI6MX0sIm1mYV9lbmFibGVkIjpmYWxzZSwic3RhdHVzIjoiQUNUSVZFIn0sImF1dGhlbnRpY2F0aW9uVHlwZSI6InNjb3BlZEtleSIsInNjb3BlZEtleUtleSI6ImMxODFjYzg3YjNiNmEyZDVkZTNlIiwic2NvcGVkS2V5U2VjcmV0IjoiZGIxMjZkZWE1MGZkYjRmYzg2MTZmNjBmM2I3NmIyZDdhNTVhMmUyNWViMWIxODRhY2E1MGI3YzUzYzA3NzI3NyIsImV4cCI6MTgwMTQxNjgyN30.2n3hPQ-DMvcoW3HqV1oDhDnOp-djpsoq6OPpk-7DOzA',
+  pinataGateway: 'chocolate-binding-mite-544.mypinata.cloud'
+})
+
+
+export function EmailList({ userAddress, contract, onEmailClick, newSentEmail }: EmailListProps) {
+  const [emails, setEmails] = useState<Email[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Immediately add sent email when passed from ComposeForm
+  useEffect(() => {
+    if (newSentEmail) {
+      setEmails(prev => {
+        if (prev.some(e => e.cid === newSentEmail.cid)) {
+          return prev; // Already exists
+        }
+        return [newSentEmail, ...prev];
+      });
+    }
+  }, [newSentEmail]);
+
+  useEffect(() => {
+    setIsLoading(true);
+
+    loadEmails(userAddress, contract)
+      .then(loadedEmails => {
+        setEmails(loadedEmails);
+        setIsLoading(false);
+      })
+      .catch(error => {
+        console.error('Error loading emails:', error);
+        setIsLoading(false);
+      });
+
+    // Handler for real-time messages
+    const handleMessage = async (from: string, to: string, cid: string, timestamp: bigint) => {
+      console.log('New Message event:', { from, to, cid, timestamp: timestamp.toString() });
+
+      // Check if this message involves the current user
+      const normalizedUser = userAddress.toLowerCase();
+      const isRecipient = to.toLowerCase() === normalizedUser;
+      const isSender = from.toLowerCase() === normalizedUser;
+
+      if (!isRecipient && !isSender) {
+        return; // Not relevant to this user
+      }
+
+      try {
+        // Fetch email content from Pinata
+        const email = await fetchEmailByCid(cid);
+        email.direction = isSender ? 'sent' : 'received';
+
+        // Add to emails list (at the top, avoiding duplicates)
+        setEmails(prev => {
+          if (prev.some(e => e.cid === cid)) {
+            return prev; // Already exists
+          }
+          return [email, ...prev];
+        });
+      } catch (error) {
+        console.error('Failed to fetch new email:', error);
+      }
+    };
+
+    // Attach listener
+    contract.on('Message', handleMessage);
+    console.log('Subscribed to Message events');
+
+    return () => {
+      contract.off('Message', handleMessage);
+      console.log('Unsubscribed from Message events');
+    };
+  }, [contract, userAddress]);
+
+
 
   return (
     <section className="flex-1 bg-dark-card rounded-2xl border border-white/10 shadow-xl overflow-hidden flex flex-col">
@@ -19,7 +97,7 @@ export function EmailList({ emails, isLoading, onEmailClick }: EmailListProps) {
           Inbox
         </h2>
         <span className="bg-linear-to-br from-primary to-accent text-white px-3 py-1 rounded-full text-xs font-semibold">
-          {unreadCount} unread
+          {emails.length}
         </span>
       </div>
 
@@ -81,19 +159,18 @@ function EmailItem({ email, onClick }: EmailItemProps) {
       onClick={onClick}
       className={`
         px-6 py-4 border-b border-white/5 cursor-pointer transition-all duration-200
-        relative group
-        ${!email.read ? 'bg-primary/5' : 'hover:bg-dark-card-hover'}
+        relative group hover:bg-dark-card-hover
       `}
     >
       {/* Left accent bar */}
       <div className={`
         absolute left-0 top-0 bottom-0 w-0.5 transition-all duration-200
-        ${!email.read ? 'bg-primary' : 'bg-transparent group-hover:bg-primary/50'}
+        bg-transparent group-hover:bg-primary/50
       `} />
 
       <div className="flex justify-between items-center mb-1">
         <div className="flex items-center gap-2">
-          {!email.read && (
+          {email.direction === 'sent' && (
             <span className="w-2 h-2 bg-primary rounded-full glow-primary" />
           )}
           <span className={`
@@ -119,4 +196,55 @@ function EmailItem({ email, onClick }: EmailItemProps) {
       <div className="text-xs text-slate-500 truncate">{email.body}</div>
     </div>
   );
+}
+
+async function loadEmails(userAddress: string, contract: ethers.Contract): Promise<Email[]> {
+  const filterToMe = contract.filters.Message(null, userAddress);
+  const filterFromMe = contract.filters.Message(userAddress, null);
+
+  const eventsTo = await contract.queryFilter(filterToMe);
+  const eventsFrom = await contract.queryFilter(filterFromMe);
+
+  // Process received emails
+  const receivedEmails = await Promise.all(
+    eventsTo.map(async (ev: any) => {
+      const email = await fetchEmailByCid(ev.args.cid);
+      email.direction = 'received';
+      return email;
+    })
+  );
+
+  // Process sent emails
+  const sentEmails = await Promise.all(
+    eventsFrom.map(async (ev: any) => {
+      const email = await fetchEmailByCid(ev.args.cid);
+      email.direction = 'sent';
+      return email;
+    })
+  );
+
+  // Combine and deduplicate (in case user sent to themselves)
+  const allEmails = [...receivedEmails, ...sentEmails];
+  const uniqueEmails = allEmails.filter((email, index, self) =>
+    index === self.findIndex(e => e.cid === email.cid)
+  );
+
+  // Sort by timestamp descending
+  uniqueEmails.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+  return uniqueEmails;
+}
+
+async function fetchEmailByCid(cid: string): Promise<Email> {
+  const data = (await pinata.gateways.public.get(cid)).data as any;
+
+  return {
+    id: cid,
+    cid,
+    from: data.from,
+    to: data.to,
+    subject: data.subject,
+    body: data.body,
+    timestamp: new Date(data.timestamp),
+  } as Email;
 }

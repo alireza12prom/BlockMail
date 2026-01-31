@@ -18,7 +18,6 @@ interface UseWalletReturn {
   userAddress: string;
   networkName: string;
   emails: Email[];
-  isLoadingMessages: boolean;
   isReconnecting: boolean;
   connectHardhat: (accountIndex: number) => Promise<void>;
   connectMetaMask: () => Promise<void>;
@@ -35,74 +34,16 @@ export function useWallet(
   const [userAddress, setUserAddress] = useState('');
   const [networkName, setNetworkName] = useState('');
   const [emails, setEmails] = useState<Email[]>([]);
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const hasAttemptedReconnect = useRef(false);
-
-  // Load past messages from the blockchain
-  const loadMessages = useCallback(async (blockMail: ethers.Contract, address: string) => {
-    setIsLoadingMessages(true);
-    try {
-      const filterTo = blockMail.filters.Message(null, address);
-      const filterFrom = blockMail.filters.Message(address, null);
-
-      const [receivedEvents, sentEvents] = await Promise.all([
-        blockMail.queryFilter(filterTo),
-        blockMail.queryFilter(filterFrom),
-      ]);
-
-      const loadedEmails: Email[] = [];
-
-      for (const event of receivedEvents) {
-        const log = event as ethers.EventLog;
-        const [from, to, cid, , sentAt] = log.args;
-        loadedEmails.push({
-          id: `${cid}-${sentAt.toString()}-received`,
-          from,
-          to,
-          subject: `Message from ${shortenAddress(from)}`,
-          body: `CID: ${cid}`,
-          cid,
-          timestamp: new Date(Number(sentAt) * 1000),
-          read: false,
-          direction: 'received',
-        });
-      }
-
-      for (const event of sentEvents) {
-        const log = event as ethers.EventLog;
-        const [from, to, cid, , sentAt] = log.args;
-        loadedEmails.push({
-          id: `${cid}-${sentAt.toString()}-sent`,
-          from,
-          to,
-          subject: `Message to ${shortenAddress(to)}`,
-          body: `CID: ${cid}`,
-          cid,
-          timestamp: new Date(Number(sentAt) * 1000),
-          read: true,
-          direction: 'sent',
-        });
-      }
-
-      loadedEmails.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-      setEmails(loadedEmails);
-
-      if (loadedEmails.length > 0) {
-        showToast(`Loaded ${loadedEmails.length} message(s)`, 'success');
-      }
-    } catch (err) {
-      console.error('Failed to load messages:', err);
-      showToast('Failed to load messages', 'error');
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  }, [showToast]);
+  const hasAttemptedReconnect = useRef(false)
 
   // Connect to local Hardhat node
   const connectHardhat = useCallback(async (accountIndex: number) => {
     try {
-      const provider = new ethers.JsonRpcProvider(HARDHAT_RPC_URL);
+      const provider = new ethers.JsonRpcProvider(HARDHAT_RPC_URL, undefined, {
+        polling: true,
+        pollingInterval: 1000, // Poll every 1 second for new events
+      });
       const signer = await provider.getSigner(accountIndex);
       const address = await signer.getAddress();
 
@@ -121,31 +62,12 @@ export function useWallet(
 
       showToast('Connected to Hardhat!', 'success');
 
-      await loadMessages(blockMail, address);
-
       // Listen for new incoming messages
-      blockMail.on('Message', (from: string, to: string, cid: string, _metaHash: string, sentAt: bigint) => {
-        if (to.toLowerCase() === address.toLowerCase()) {
-          const newEmail: Email = {
-            id: `${cid}-${sentAt.toString()}-received`,
-            from,
-            to,
-            subject: `Message from ${shortenAddress(from)}`,
-            body: `CID: ${cid}`,
-            cid,
-            timestamp: new Date(Number(sentAt) * 1000),
-            read: false,
-            direction: 'received',
-          };
-          setEmails(prev => [newEmail, ...prev]);
-          showToast('New message received!', 'success');
-        }
-      });
     } catch (err) {
       console.error('Connection failed:', err);
       showToast('Failed to connect. Is Hardhat running?', 'error');
     }
-  }, [loadMessages, showToast]);
+  }, [showToast]);
 
   // Connect via MetaMask
   const connectMetaMask = useCallback(async () => {
@@ -180,13 +102,11 @@ export function useWallet(
       } as ConnectionInfo));
 
       showToast('Connected via MetaMask!', 'success');
-
-      await loadMessages(blockMail, address);
     } catch (err) {
       console.error('MetaMask connection failed:', err);
       showToast('MetaMask connection failed', 'error');
     }
-  }, [loadMessages, showToast]);
+  }, [showToast]);
 
   // Disconnect
   const disconnect = useCallback(() => {
@@ -251,7 +171,6 @@ export function useWallet(
     userAddress,
     networkName,
     emails,
-    isLoadingMessages,
     isReconnecting,
     connectHardhat,
     connectMetaMask,

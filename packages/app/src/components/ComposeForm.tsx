@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ethers } from 'ethers';
 import { Email } from '../types';
+import { PinataSDK } from 'pinata';
 
 interface ComposeFormProps {
   isConnected: boolean;
@@ -11,6 +12,11 @@ interface ComposeFormProps {
   onSuccess: (message: string) => void;
   initialRecipient?: string;
 }
+
+const pinata = new PinataSDK({
+  pinataJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI5NDFmNTA5Ni0zY2M0LTRjNDItOTUyMC1mM2NmNmUxNjA3MjQiLCJlbWFpbCI6ImFsaXJlemEucmV6YXBvdXIubWVAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBpbl9wb2xpY3kiOnsicmVnaW9ucyI6W3siZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiRlJBMSJ9LHsiZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiTllDMSJ9XSwidmVyc2lvbiI6MX0sIm1mYV9lbmFibGVkIjpmYWxzZSwic3RhdHVzIjoiQUNUSVZFIn0sImF1dGhlbnRpY2F0aW9uVHlwZSI6InNjb3BlZEtleSIsInNjb3BlZEtleUtleSI6ImMxODFjYzg3YjNiNmEyZDVkZTNlIiwic2NvcGVkS2V5U2VjcmV0IjoiZGIxMjZkZWE1MGZkYjRmYzg2MTZmNjBmM2I3NmIyZDdhNTVhMmUyNWViMWIxODRhY2E1MGI3YzUzYzA3NzI3NyIsImV4cCI6MTgwMTQxNjgyN30.2n3hPQ-DMvcoW3HqV1oDhDnOp-djpsoq6OPpk-7DOzA',
+  pinataGateway: 'chocolate-binding-mite-544.mypinata.cloud'
+})
 
 export function ComposeForm({
   isConnected,
@@ -47,22 +53,28 @@ export function ComposeForm({
     setIsSending(true);
 
     try {
-      const cid = `Qm${Date.now()}${Math.random().toString(36).substring(7)}`;
-      const metaHash = ethers.keccak256(ethers.toUtf8Bytes(`subject: ${subject}`));
+      // Upload message to IPFS via Pinata
+      const cid = await uploadToPinata({
+        from: userAddress,
+        to: recipient,
+        subject,
+        body
+      });
+      console.log('Uploaded to IPFS with CID:', cid);
 
-      const tx = await contract.sendMessage(recipient, cid, metaHash);
+      const tx = await contract.sendMessage(recipient, cid);
       await tx.wait();
 
       onSuccess('Message sent successfully!');
 
       // Create sent email
       const sentEmail: Email = {
-        id: `sent-${Date.now()}`,
+        id: cid,
+        cid,
         from: userAddress,
         to: recipient,
         subject,
         body,
-        cid,
         timestamp: new Date(),
         read: true,
         direction: 'sent',
@@ -161,4 +173,21 @@ export function ComposeForm({
       </form>
     </section>
   );
+}
+
+async function uploadToPinata(data: {
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+}): Promise<string> {
+  const result = await pinata.upload.public.json({
+    from: data.from,
+    to: data.to,
+    subject: data.subject,
+    body: data.body,
+    timestamp: Date.now()
+  });
+
+  return result.cid;
 }

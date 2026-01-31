@@ -20,8 +20,6 @@ function App() {
     contract,
     userAddress,
     networkName,
-    emails,
-    isLoadingMessages,
     isReconnecting,
     connectHardhat,
     connectMetaMask,
@@ -34,6 +32,7 @@ function App() {
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [replyTo, setReplyTo] = useState('');
+  const [newSentEmail, setNewSentEmail] = useState<Email | null>(null);
 
   // Handle email click
   const handleEmailClick = (email: Email) => {
@@ -86,15 +85,19 @@ function App() {
         ) : (
           <>
             <EmailList
-              emails={emails}
-              isLoading={isLoadingMessages}
+              userAddress={userAddress}
+              contract={contract!}
               onEmailClick={handleEmailClick}
+              newSentEmail={newSentEmail}
             />
             <ComposeForm
               isConnected={isConnected}
               userAddress={userAddress}
               contract={contract}
-              onMessageSent={addEmail}
+              onMessageSent={(email) => {
+                addEmail(email);
+                setNewSentEmail(email);
+              }}
               onError={(msg) => showToast(msg, 'error')}
               onSuccess={(msg) => showToast(msg, 'success')}
               initialRecipient={replyTo}
