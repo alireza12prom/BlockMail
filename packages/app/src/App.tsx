@@ -25,7 +25,7 @@ function App() {
     keyRegistry,
     userAddress,
     networkName,
-    cachedWalletAddress,
+    cachedWallets,
     connectWithWallet,
     reconnectCachedWallet,
     disconnect,
@@ -113,9 +113,9 @@ function App() {
       <ConnectModal
         isOpen={showConnectModal}
         onClose={() => setShowConnectModal(false)}
-        cachedWalletAddress={cachedWalletAddress}
-        onReconnectCached={async () => {
-          await reconnectCachedWallet();
+        cachedWallets={cachedWallets}
+        onReconnectCached={async (address) => {
+          await reconnectCachedWallet(address);
           setShowConnectModal(false);
         }}
         onOpenCreateWallet={() => {

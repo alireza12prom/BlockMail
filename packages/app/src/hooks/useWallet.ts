@@ -5,8 +5,38 @@ import { CONTRACT_ABI, CONTRACT_ADDRESS, KEY_REGISTRY_ABI, KEY_REGISTRY_ADDRESS,
 import { createKeypairLoader } from '../services/keypairStorage';
 import { registerPublicKey } from '../services/keyRegistryService';
 
-/** Cache key for last connected wallet (private key stored; kept after disconnect so user can reconnect). */
-const CACHED_WALLET_KEY = 'blockmail_cached_wallet';
+/** Cache key for last 3 connected wallets. Stored as array of { address, privateKey }, most recent first. */
+const CACHED_WALLETS_KEY = 'blockmail_cached_wallets';
+/** Legacy single-wallet cache key (migrated to CACHED_WALLETS_KEY on read). */
+const CACHED_WALLET_KEY_LEGACY = 'blockmail_cached_wallet';
+const MAX_CACHED_WALLETS = 3;
+
+function getCachedWalletsList(): { address: string; privateKey: string }[] {
+  const raw = localStorage.getItem(CACHED_WALLETS_KEY);
+  if (!raw) {
+    const legacy = localStorage.getItem(CACHED_WALLET_KEY_LEGACY);
+    if (legacy) {
+      try {
+        const one = JSON.parse(legacy) as { address?: string; privateKey?: string };
+        if (one?.address && one?.privateKey) {
+          const list = [{ address: one.address, privateKey: one.privateKey }];
+          localStorage.setItem(CACHED_WALLETS_KEY, JSON.stringify(list));
+          localStorage.removeItem(CACHED_WALLET_KEY_LEGACY);
+          return list;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((w: unknown) => w && typeof w === 'object' && 'address' in w && 'privateKey' in w) : [];
+  } catch {
+    return [];
+  }
+}
 
 /** Set when user clicks Disconnect; prevents auto-restore on next page load. Cleared when user connects again. */
 const DISCONNECTED_KEY = 'blockmail_disconnected';
@@ -35,11 +65,11 @@ interface UseWalletReturn {
   userAddress: string;
   networkName: string;
   emails: Email[];
-  /** Address of the cached wallet (last used), if any. Shown in Connect modal for one-click reconnect. */
-  cachedWalletAddress: string | null;
+  /** Up to 3 latest cached wallet addresses (for Connect modal). */
+  cachedWallets: { address: string }[];
   connectWithWallet: (wallet: SignerLike) => Promise<void>;
-  /** Reconnect using the cached wallet (from localStorage). No-op if no cache. */
-  reconnectCachedWallet: () => Promise<void>;
+  /** Reconnect using a cached wallet by address. */
+  reconnectCachedWallet: (address: string) => Promise<void>;
   disconnect: () => void;
   addEmail: (email: Email) => void;
   markAsRead: (emailId: string) => void;
@@ -55,15 +85,9 @@ export function useWallet(
   const [networkName, setNetworkName] = useState('');
   const [emails, setEmails] = useState<Email[]>([]);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const [cachedWalletAddress, setCachedWalletAddress] = useState<string | null>(() => {
-    try {
-      const raw = localStorage.getItem(CACHED_WALLET_KEY);
-      if (!raw) return null;
-      const data = JSON.parse(raw) as { address?: string };
-      return data?.address ?? null;
-    } catch {
-      return null;
-    }
+  const [cachedWallets, setCachedWallets] = useState<{ address: string }[]>(() => {
+    const list = getCachedWalletsList();
+    return list.map((w) => ({ address: w.address })).slice(0, MAX_CACHED_WALLETS);
   });
   const hasRestoredRef = useRef(false);
 
@@ -88,13 +112,14 @@ export function useWallet(
         setNetworkName('Hardhat Local');
         setIsConnected(true);
 
-        // Cache wallet so user can reconnect without re-importing (private key in localStorage)
+        // Keep last 3 connected wallets (most recent first)
         try {
-          localStorage.setItem(
-            CACHED_WALLET_KEY,
-            JSON.stringify({ address, privateKey: wallet.privateKey })
-          );
-          setCachedWalletAddress(address);
+          let list = getCachedWalletsList();
+          list = list.filter((w) => w.address.toLowerCase() !== address.toLowerCase());
+          list.unshift({ address, privateKey: wallet.privateKey });
+          list = list.slice(0, MAX_CACHED_WALLETS);
+          localStorage.setItem(CACHED_WALLETS_KEY, JSON.stringify(list));
+          setCachedWallets(list.map((w) => ({ address: w.address })));
           localStorage.removeItem(DISCONNECTED_KEY); // allow auto-restore on next load
         } catch {
           // ignore storage errors
@@ -128,41 +153,33 @@ export function useWallet(
 
     if (localStorage.getItem(DISCONNECTED_KEY) === 'true') return;
 
-    const raw = localStorage.getItem(CACHED_WALLET_KEY);
-    if (!raw) return;
+    const list = getCachedWalletsList();
+    if (list.length === 0) return;
 
-    let data: { address?: string; privateKey?: string };
-    try {
-      data = JSON.parse(raw);
-      if (!data?.privateKey) return;
-    } catch {
-      return;
-    }
+    const first = list[0];
+    if (!first?.privateKey) return;
 
     setIsReconnecting(true);
-    const wallet = new ethers.Wallet(data.privateKey);
+    const wallet = new ethers.Wallet(first.privateKey);
     connectWithWallet(wallet).finally(() => setIsReconnecting(false));
   }, [connectWithWallet]);
 
-  // Reconnect using cached wallet (e.g. when user clicks "Reconnect with 0x..." in Connect modal)
-  const reconnectCachedWallet = useCallback(async () => {
-    const raw = localStorage.getItem(CACHED_WALLET_KEY);
-    if (!raw) return;
-    let data: { address?: string; privateKey?: string };
-    try {
-      data = JSON.parse(raw);
-      if (!data?.privateKey) return;
-    } catch {
-      return;
-    }
-    setIsReconnecting(true);
-    try {
-      const wallet = new ethers.Wallet(data.privateKey);
-      await connectWithWallet(wallet);
-    } finally {
-      setIsReconnecting(false);
-    }
-  }, [connectWithWallet]);
+  // Reconnect using a cached wallet by address
+  const reconnectCachedWallet = useCallback(
+    async (address: string) => {
+      const list = getCachedWalletsList();
+      const entry = list.find((w) => w.address.toLowerCase() === address.toLowerCase());
+      if (!entry?.privateKey) return;
+      setIsReconnecting(true);
+      try {
+        const wallet = new ethers.Wallet(entry.privateKey);
+        await connectWithWallet(wallet);
+      } finally {
+        setIsReconnecting(false);
+      }
+    },
+    [connectWithWallet]
+  );
 
   // Disconnect: clear app state, keep cache for "Reconnect with 0x...", but set flag so reload does not auto-restore
   const disconnect = useCallback(async () => {
@@ -203,7 +220,7 @@ export function useWallet(
     userAddress,
     networkName,
     emails,
-    cachedWalletAddress,
+    cachedWallets,
     connectWithWallet,
     reconnectCachedWallet,
     disconnect,

@@ -3,9 +3,9 @@ import { shortenAddress } from '../utils/helpers';
 interface ConnectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Last used wallet address; if set, show "Reconnect with 0x..." button */
-  cachedWalletAddress: string | null;
-  onReconnectCached: () => void;
+  /** Up to 3 latest connected wallet addresses */
+  cachedWallets: { address: string }[];
+  onReconnectCached: (address: string) => void;
   onOpenCreateWallet: () => void;
   onOpenImportWallet: () => void;
 }
@@ -13,12 +13,14 @@ interface ConnectModalProps {
 export function ConnectModal({
   isOpen,
   onClose,
-  cachedWalletAddress,
+  cachedWallets,
   onReconnectCached,
   onOpenCreateWallet,
   onOpenImportWallet,
 }: ConnectModalProps) {
   if (!isOpen) return null;
+
+  const hasCached = cachedWallets.length > 0;
 
   return (
     <div
@@ -32,40 +34,53 @@ export function ConnectModal({
         <div className="px-6 py-5 border-b border-white/10 bg-white/2">
           <h3 className="text-xl font-semibold text-slate-100">Connect Wallet</h3>
           <p className="text-sm text-slate-400 mt-1">
-            {cachedWalletAddress ? 'Reconnect or use another wallet' : 'Create a new wallet or import an existing one'}
+            {hasCached ? 'Reconnect or use another wallet' : 'Create a new wallet or import an existing one'}
           </p>
         </div>
 
         <div className="p-6 space-y-3">
-          {cachedWalletAddress && (
+          {cachedWallets.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                Recent wallets
+              </span>
+              <div className="space-y-2">
+                {cachedWallets.map(({ address }) => (
+                  <button
+                    key={address}
+                    type="button"
+                    onClick={() => {
+                      onReconnectCached(address);
+                      onClose();
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary/15 hover:bg-primary/25 border border-primary/30 hover:border-primary/50 rounded-xl transition-all text-slate-100 font-medium text-sm"
+                  >
+                    <span className="text-base">↻</span>
+                    {shortenAddress(address)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3">
             <button
               type="button"
-              onClick={() => {
-                onReconnectCached();
-                onClose();
-              }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-primary/20 hover:bg-primary/30 border border-primary/40 hover:border-primary/50 rounded-xl transition-all text-slate-100 font-medium"
+              onClick={onOpenCreateWallet}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-3 bg-primary/10 hover:bg-primary/20 border border-primary/30 hover:border-primary/50 rounded-xl transition-all text-slate-100 font-medium text-sm"
             >
-              <span className="text-lg">↻</span>
-              Reconnect with {shortenAddress(cachedWalletAddress)}
+              <span className="text-lg">+</span>
+              Create
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onOpenCreateWallet}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-primary/10 hover:bg-primary/20 border border-primary/30 hover:border-primary/50 rounded-xl transition-all text-slate-100 font-medium"
-          >
-            <span className="text-lg">+</span>
-            Create new wallet
-          </button>
-          <button
-            type="button"
-            onClick={onOpenImportWallet}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-primary/30 rounded-xl transition-all text-slate-300 hover:text-slate-100 font-medium"
-          >
-            <span className="text-lg">↩</span>
-            Import wallet
-          </button>
+            <button
+              type="button"
+              onClick={onOpenImportWallet}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-3 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-primary/30 rounded-xl transition-all text-slate-300 hover:text-slate-100 font-medium text-sm"
+            >
+              <span className="text-lg">↩</span>
+              Import
+            </button>
+          </div>
         </div>
 
         <div className="px-6 py-4 border-t border-white/10 bg-white/2">
