@@ -1,7 +1,7 @@
 import { network } from "hardhat";
 
 async function main() {
-  const { ethers } = await network.connect();
+  const { ethers } = await network.connect('localhost');
 
   const mailbox = await ethers.deployContract("BlockMail");
   await mailbox.waitForDeployment();

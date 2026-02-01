@@ -63,6 +63,7 @@ export function ComposeForm({
       });
       console.log('Uploaded to IPFS with CID:', cid);
 
+      console.log(recipient)
       const tx = await contract.sendMessage(recipient, cid);
       await tx.wait();
 

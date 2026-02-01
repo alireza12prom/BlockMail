@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { Email } from '../types';
-import { CONTRACT_ABI, CONTRACT_ADDRESS, WS_URL } from '../config/constants';
+import { CONTRACT_ABI, CONTRACT_ADDRESS, RPC_URL } from '../config/constants';
 
 // Storage key for persisting connection
 const STORAGE_KEY = 'blockmail_connection';
@@ -38,8 +38,8 @@ export function useWallet(
   // Connect to local Hardhat node
   const connectHardhat = useCallback(async (accountIndex: number) => {
     try {
-      // Use WebSocket provider for real-time event subscriptions
-      const provider = new ethers.WebSocketProvider(WS_URL);
+      // Use HTTP provider; Hardhat node works reliably with HTTP for queryFilter/getBlockNumber
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
       
       // Get account from hardhat's default accounts
       const accounts = await provider.send('eth_accounts', []);
@@ -72,11 +72,6 @@ export function useWallet(
   const disconnect = useCallback(async () => {
     if (contract) {
       contract.removeAllListeners();
-      // Close WebSocket connection if exists
-      const provider = contract.runner?.provider;
-      if (provider && 'destroy' in provider) {
-        await (provider as ethers.WebSocketProvider).destroy();
-      }
     }
     // Clear saved connection
     localStorage.removeItem(STORAGE_KEY);
