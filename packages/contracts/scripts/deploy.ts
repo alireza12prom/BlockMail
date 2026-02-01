@@ -1,5 +1,4 @@
 import { network } from "hardhat";
-import { syncToShared } from "./sync-shared.js";
 
 async function main() {
   const { ethers } = await network.connect();
@@ -11,11 +10,6 @@ async function main() {
   const { chainId } = await ethers.provider.getNetwork();
 
   console.log("BlockMail deployed to:", address, "chainId:", chainId.toString());
-
-  await syncToShared({
-    chainId: Number(chainId),
-    mailboxAddress: address,
-  });
 }
 
 main().catch((err) => {
