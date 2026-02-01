@@ -1,15 +1,26 @@
 {
-  "name": "blockmail",
+  "name": "@blockmail/contracts",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "BlockMail smart contracts for Ethereum",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "hardhat:deploy": "hardhat run scripts/deploy.ts --network localhost "
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy": "hardhat run scripts/deploy.ts",
+    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "clean": "hardhat clean"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "solidity",
+    "ethereum",
+    "smart-contracts",
+    "blockchain"
+  ],
+  "author": {
+    "name": "Alireza Rezapour",
+    "email": "alireza.rezapour.me@gmail.com"
+  },
+  "license": "MIT",
   "type": "module",
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.0.4",

@@ -1,57 +1,106 @@
-# Sample Hardhat 3 Beta Project (`mocha` and `ethers`)
+# @blockmail/contracts
 
-This project showcases a Hardhat 3 Beta project using `mocha` for tests and the `ethers` library for Ethereum interactions.
+Smart contracts for the BlockMail decentralized email system.
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+## Overview
 
-## Project Overview
+The BlockMail smart contract provides on-chain messaging metadata storage. Messages are sent between Ethereum addresses with content stored off-chain on IPFS.
 
-This example project includes:
+## Contract
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using `mocha` and ethers.js
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+### BlockMail.sol
 
-## Usage
+A simple event-emitting contract that records message metadata:
 
-### Running Tests
+```solidity
+event Message(
+    address indexed from,
+    address indexed to,
+    string cid,
+    uint256 timestamp
+);
 
-To run all the tests in the project, execute the following command:
-
-```shell
-npx hardhat test
+function sendMessage(address to, string calldata cid) external;
 ```
 
-You can also selectively run the Solidity or `mocha` tests:
+**Parameters:**
+- `to`: Recipient's Ethereum address
+- `cid`: IPFS Content Identifier where the message is stored
 
-```shell
-npx hardhat test solidity
-npx hardhat test mocha
+## Development
+
+### Prerequisites
+
+- Node.js >= 18.0.0
+- npm >= 9.0.0
+
+### Install Dependencies
+
+```bash
+npm install
 ```
 
-### Make a deployment to Sepolia
+### Compile Contracts
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
-
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
+```bash
+npm run compile
 ```
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+### Run Tests
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+```bash
+npm run test
 ```
 
-After setting the variable, you can run the deployment with the Sepolia network:
+### Start Local Node
 
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
+Start a local Hardhat node for development:
+
+```bash
+npm run node
 ```
+
+### Deploy
+
+Deploy to local network:
+
+```bash
+npm run deploy:local
+```
+
+Deploy to a configured network:
+
+```bash
+npm run deploy -- --network <network-name>
+```
+
+## Network Configuration
+
+### Localhost
+
+Default local development network at `http://127.0.0.1:8545`.
+
+### Sepolia Testnet
+
+To deploy to Sepolia:
+
+1. Set up your private key:
+   ```bash
+   npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+   ```
+
+2. Deploy:
+   ```bash
+   npm run deploy -- --network sepolia
+   ```
+
+## Deployment Artifacts
+
+Deployment artifacts are stored in `ignition/deployments/` and include:
+- Contract ABI
+- Deployed addresses
+- Build info
+
+## License
+
+MIT
