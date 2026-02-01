@@ -1,0 +1,12 @@
+node_modules
+.git
+.gitignore
+*.log
+.env
+.env.*
+coverage
+coverage.json
+.nyc_output
+*.md
+!README.md
+ignition/deployments

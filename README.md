@@ -44,6 +44,7 @@ blockmail/
 │       ├── ignition/         # Deployment modules
 │       ├── scripts/          # Deployment scripts
 │       └── test/             # Contract tests
+├── docker-compose.yml    # Run local blockchain in Docker
 ├── package.json          # Root workspace config
 └── README.md
 ```
@@ -112,6 +113,45 @@ Or run everything together:
 ```bash
 npm run dev
 ```
+
+### Running with Docker
+
+Run the local Hardhat blockchain and deploy the contract in containers:
+
+```bash
+docker compose up -d
+```
+
+This starts:
+
+- **blockchain** – Hardhat node at `http://localhost:8545`
+- **deploy** – One-off job that deploys the BlockMail contract once the node is ready
+
+Then start the app on your host (the app is a desktop GUI, so it runs outside Docker):
+
+```bash
+npm run app:start
+```
+
+Ensure `packages/app/.env` uses `VITE_RPC_URL=http://127.0.0.1:8545` and `VITE_WS_URL=ws://127.0.0.1:8545`. The deploy job prints the contract address; if it differs from your default, set `VITE_CONTRACT_ADDRESS` in `.env` to match.
+
+Stop the stack:
+
+```bash
+docker compose down
+```
+
+Or use npm scripts: `npm run docker:up`, `npm run docker:down`, `npm run docker:logs`.
+
+#### Building the client app in Docker
+
+You can build the Electron app (Linux `.deb`, `.rpm`, etc.) inside Docker for reproducible or CI builds:
+
+```bash
+docker compose run --rm app-build
+```
+
+Artifacts are written to `packages/app/out/`. The desktop app itself is intended to run on your host (it’s a GUI); use this when you want to produce installers in a container.
 
 ## Tech Stack
 

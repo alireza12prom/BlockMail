@@ -1,0 +1,13 @@
+node_modules
+.git
+.gitignore
+*.log
+.env
+.env.*
+.vite
+out
+.cache
+.next
+.nuxt
+*.md
+!README.md
