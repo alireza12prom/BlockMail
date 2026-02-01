@@ -16,11 +16,6 @@ export interface ToastData {
   type: 'success' | 'error';
 }
 
-export interface HardhatAccount {
-  address: string;
-  name: string;
-}
-
 // Extend Window interface for ethereum
 declare global {
   interface Window {

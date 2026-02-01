@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { ethers } from 'ethers';
 import { Email } from '../types';
 import { shortenAddress, formatTime } from '../utils/helpers';
-import { HARDHAT_ACCOUNTS } from '../config/constants';
 import { useEmails } from '../hooks/useEmails';
 
 interface EmailListProps {
@@ -104,7 +103,7 @@ function EmptyState() {
       <h3 className="text-lg font-semibold text-slate-300 mb-2">No messages yet</h3>
       <p className="text-sm text-slate-500">Send your first blockchain-powered email!</p>
       <p className="text-xs text-slate-600 mt-4">
-        Try sending to: <span className="address">{HARDHAT_ACCOUNTS[1].address}</span>
+        Connect a wallet and send your first message to any Ethereum address.
       </p>
     </div>
   );
@@ -136,8 +135,8 @@ function EmailItem({ email, onClick }: EmailItemProps) {
           )}
           <span
             className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded ${email.direction === 'sent'
-                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                : 'bg-primary/10 text-primary-light border border-primary/20'
+              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+              : 'bg-primary/10 text-primary-light border border-primary/20'
               }`}
           >
             {email.direction}

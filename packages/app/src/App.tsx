@@ -1,13 +1,16 @@
 // src/App.tsx
 import { useState } from 'react';
+import { ethers } from 'ethers';
 import {
   Header,
   EmailList,
   ComposeForm,
   ConnectModal,
+  CreateWalletModal,
+  ImportWalletModal,
   EmailDetailModal,
   WelcomeScreen,
-  Toast
+  Toast,
 } from './components';
 import { useToast } from './hooks/useToast';
 import { useWallet } from './hooks/useWallet';
@@ -17,12 +20,14 @@ function App() {
   const { toast, showToast } = useToast();
   const {
     isConnected,
+    isReconnecting,
     contract,
     keyRegistry,
     userAddress,
     networkName,
-    isReconnecting,
-    connectHardhat,
+    cachedWalletAddress,
+    connectWithWallet,
+    reconnectCachedWallet,
     disconnect,
     addEmail,
     markAsRead,
@@ -30,6 +35,8 @@ function App() {
 
   // UI state
   const [showConnectModal, setShowConnectModal] = useState(false);
+  const [showCreateWalletModal, setShowCreateWalletModal] = useState(false);
+  const [showImportWalletModal, setShowImportWalletModal] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [replyTo, setReplyTo] = useState('');
   const [newSentEmail, setNewSentEmail] = useState<Email | null>(null);
@@ -46,10 +53,11 @@ function App() {
     setSelectedEmail(null);
   };
 
-  // Handle connect
-  const handleConnectHardhat = async (index: number) => {
-    await connectHardhat(index);
+  const handleUseWallet = async (wallet: ethers.Wallet | ethers.HDNodeWallet) => {
+    await connectWithWallet(wallet);
     setShowConnectModal(false);
+    setShowCreateWalletModal(false);
+    setShowImportWalletModal(false);
   };
 
   return (
@@ -64,7 +72,6 @@ function App() {
 
       <main className="max-w-7xl mx-auto p-6 flex gap-6">
         {isReconnecting ? (
-          /* Reconnecting State */
           <div className="flex-1 flex items-center justify-center py-20">
             <div className="text-center">
               <div className="w-16 h-16 mb-6 mx-auto relative">
@@ -72,7 +79,7 @@ function App() {
                 <div className="absolute inset-0 border-4 border-transparent border-t-primary rounded-full animate-spin" />
               </div>
               <h2 className="text-xl font-semibold text-slate-200 mb-2">Reconnecting...</h2>
-              <p className="text-slate-400 text-sm">Restoring your previous session</p>
+              <p className="text-slate-400 text-sm">Restoring your wallet</p>
             </div>
           </div>
         ) : !isConnected ? (
@@ -106,7 +113,31 @@ function App() {
       <ConnectModal
         isOpen={showConnectModal}
         onClose={() => setShowConnectModal(false)}
-        onConnectHardhat={handleConnectHardhat}
+        cachedWalletAddress={cachedWalletAddress}
+        onReconnectCached={async () => {
+          await reconnectCachedWallet();
+          setShowConnectModal(false);
+        }}
+        onOpenCreateWallet={() => {
+          setShowConnectModal(false);
+          setShowCreateWalletModal(true);
+        }}
+        onOpenImportWallet={() => {
+          setShowConnectModal(false);
+          setShowImportWalletModal(true);
+        }}
+      />
+
+      <CreateWalletModal
+        isOpen={showCreateWalletModal}
+        onClose={() => setShowCreateWalletModal(false)}
+        onUseWallet={handleUseWallet}
+      />
+
+      <ImportWalletModal
+        isOpen={showImportWalletModal}
+        onClose={() => setShowImportWalletModal(false)}
+        onUseWallet={handleUseWallet}
       />
 
       <EmailDetailModal
