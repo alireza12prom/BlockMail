@@ -1,16 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { Email } from '../types';
-import { PinataSDK } from 'pinata';
-import { PINATA_JWT, PINATA_GATEWAY } from '../config/constants';
-import {
-  getKeyPair,
-  encryptEmailPayload,
-  pkToBytes32,
-  bytes32ToPk,
-} from '../utils/helpers';
-
-const X25519_STORAGE_PREFIX = 'blockmail_x25519_sk_';
+import { sendEmail } from '../services/emailService';
 
 interface ComposeFormProps {
   isConnected: boolean;
@@ -23,11 +14,6 @@ interface ComposeFormProps {
   initialRecipient?: string;
 }
 
-const pinata = new PinataSDK({
-  pinataJwt: PINATA_JWT,
-  pinataGateway: PINATA_GATEWAY
-})
-
 export function ComposeForm({
   isConnected,
   userAddress,
@@ -36,7 +22,7 @@ export function ComposeForm({
   onMessageSent,
   onError,
   onSuccess,
-  initialRecipient = ''
+  initialRecipient = '',
 }: ComposeFormProps) {
   const [recipient, setRecipient] = useState(initialRecipient);
   const [subject, setSubject] = useState('');
@@ -50,110 +36,48 @@ export function ComposeForm({
       onError('Not connected to blockchain');
       return;
     }
-
     if (!keyRegistry) {
       onError('KeyRegistry not configured');
       return;
     }
-
     if (!ethers.isAddress(recipient)) {
       onError('Invalid recipient address');
       return;
     }
-
     if (!subject.trim() || !body.trim()) {
       onError('Please fill in all fields');
       return;
     }
 
     setIsSending(true);
-
     try {
-      const loadSk = () =>
-        Promise.resolve(
-          (() => {
-            const raw = localStorage.getItem(X25519_STORAGE_PREFIX + userAddress.toLowerCase());
-            if (!raw) return null;
-            const arr = JSON.parse(raw) as number[];
-            return arr.length === 32 ? new Uint8Array(arr) : null;
-          })()
-        );
-      const saveSk = (sk: Uint8Array) =>
-        Promise.resolve(localStorage.setItem(X25519_STORAGE_PREFIX + userAddress.toLowerCase(), JSON.stringify(Array.from(sk))));
-
-      const { pk: senderPk, sk: senderSk } = await getKeyPair(loadSk, saveSk);
-      console.log('My KeyPair: ', { senderPk, senderSk });
-
-      const recipientPkBytes32 = await keyRegistry.pk(recipient);
-      const zeroBytes32 = '0x' + '0'.repeat(64);
-      if (!recipientPkBytes32 || recipientPkBytes32 === zeroBytes32) {
-        onError('Recipient has not registered a public key');
-        setIsSending(false);
-        return;
-      }
-
-      const recipientPk = bytes32ToPk(recipientPkBytes32.slice(2));
-
-      const payload = JSON.stringify({
+      const sentEmail = await sendEmail({
         from: userAddress,
         to: recipient,
-        subject,
-        body,
-        timestamp: Date.now(),
+        subject: subject.trim(),
+        body: body.trim(),
+        contract,
+        keyRegistry,
       });
-      const { nonce, ciphertext } = await encryptEmailPayload(payload, recipientPk, senderSk);
-
-      const pkHex = pkToBytes32(senderPk);
-      const currentPk = await keyRegistry.pk(userAddress);
-      if (!currentPk || currentPk === zeroBytes32 || currentPk !== '0x' + pkHex) {
-        const txSet = await keyRegistry.setPubKey('0x' + pkHex);
-        await txSet.wait();
-      }
-
-      const cid = await uploadToPinataEncrypted({
-        from: userAddress,
-        to: recipient,
-        nonce,
-        ciphertext,
-      });
-      console.log('Uploaded encrypted to IPFS with CID:', cid);
-
-      const tx = await contract.sendMessage(recipient, cid);
-      await tx.wait();
 
       onSuccess('Message sent successfully!');
-
-      // Create sent email
-      const sentEmail: Email = {
-        id: cid,
-        cid,
-        from: userAddress,
-        to: recipient,
-        subject,
-        body,
-        timestamp: new Date(),
-        read: true,
-        direction: 'sent',
-      };
       onMessageSent(sentEmail);
-
-      // Clear form
       setRecipient('');
       setSubject('');
       setBody('');
-
     } catch (err) {
       console.error('Failed to send:', err);
-      onError('Failed to send message');
+      onError(err instanceof Error ? err.message : 'Failed to send message');
     } finally {
       setIsSending(false);
     }
   };
 
-  // Update recipient when initialRecipient changes (for reply)
-  if (initialRecipient && initialRecipient !== recipient && !recipient) {
-    setRecipient(initialRecipient);
-  }
+  useEffect(() => {
+    if (initialRecipient && recipient !== initialRecipient && !recipient) {
+      setRecipient(initialRecipient);
+    }
+  }, [initialRecipient, recipient]);
 
   return (
     <section className="w-[420px] shrink-0 bg-dark-card rounded-2xl border border-white/10 shadow-xl flex flex-col">
@@ -174,7 +98,7 @@ export function ComposeForm({
             type="text"
             placeholder="0x..."
             value={recipient}
-            onChange={e => setRecipient(e.target.value)}
+            onChange={(e) => setRecipient(e.target.value)}
             disabled={isSending}
             className="w-full px-4 py-3 bg-dark-secondary border border-white/10 rounded-xl text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 focus:bg-primary/5 transition-all disabled:opacity-50"
           />
@@ -189,7 +113,7 @@ export function ComposeForm({
             type="text"
             placeholder="What's this about?"
             value={subject}
-            onChange={e => setSubject(e.target.value)}
+            onChange={(e) => setSubject(e.target.value)}
             disabled={isSending}
             className="w-full px-4 py-3 bg-dark-secondary border border-white/10 rounded-xl text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 focus:bg-primary/5 transition-all disabled:opacity-50"
           />
@@ -203,7 +127,7 @@ export function ComposeForm({
             id="body"
             placeholder="Write your message here..."
             value={body}
-            onChange={e => setBody(e.target.value)}
+            onChange={(e) => setBody(e.target.value)}
             disabled={isSending}
             className="w-full flex-1 min-h-[160px] px-4 py-3 bg-dark-secondary border border-white/10 rounded-xl text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 focus:bg-primary/5 transition-all resize-none disabled:opacity-50"
           />
@@ -229,19 +153,4 @@ export function ComposeForm({
       </form>
     </section>
   );
-}
-
-async function uploadToPinataEncrypted(data: {
-  from: string;
-  to: string;
-  nonce: string;
-  ciphertext: string;
-}): Promise<string> {
-  const result = await pinata.upload.public.json({
-    from: data.from,
-    to: data.to,
-    nonce: data.nonce,
-    ciphertext: data.ciphertext,
-  });
-  return result.cid;
 }

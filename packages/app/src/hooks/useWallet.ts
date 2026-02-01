@@ -2,11 +2,10 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { Email } from '../types';
 import { CONTRACT_ABI, CONTRACT_ADDRESS, KEY_REGISTRY_ABI, KEY_REGISTRY_ADDRESS, RPC_URL } from '../config/constants';
-import { getKeyPair, pkToBytes32 } from '../utils/helpers';
+import { createKeypairLoader } from '../services/keypairStorage';
+import { registerPublicKey } from '../services/keyRegistryService';
 
-// Storage key for persisting connection
 const STORAGE_KEY = 'blockmail_connection';
-const X25519_STORAGE_PREFIX = 'blockmail_x25519_sk_';
 
 interface ConnectionInfo {
   type: 'hardhat';
@@ -71,30 +70,11 @@ export function useWallet(
 
       showToast('Connected to Hardhat!', 'success');
 
-      // Register X25519 public key in KeyRegistry when wallet connects
       if (keyReg) {
-        const loadSk = () =>
-          Promise.resolve(
-            (() => {
-              const raw = localStorage.getItem(X25519_STORAGE_PREFIX + address.toLowerCase());
-              if (!raw) return null;
-              const arr = JSON.parse(raw) as number[];
-              return arr.length === 32 ? new Uint8Array(arr) : null;
-            })()
-          );
-        const saveSk = (sk: Uint8Array) =>
-          Promise.resolve(localStorage.setItem(X25519_STORAGE_PREFIX + address.toLowerCase(), JSON.stringify(Array.from(sk))));
-
-        getKeyPair(loadSk, saveSk)
-          .then(async ({ pk }: { pk: Uint8Array }) => {
-            const pkHex = '0x' + pkToBytes32(pk);
-            const current = await keyReg.pk(address);
-            const zero = '0x' + '0'.repeat(64);
-            if (current === zero || (current && current.toLowerCase() !== pkHex.toLowerCase())) {
-              const tx = await keyReg.setPubKey(pkHex);
-              await tx.wait();
-              showToast('Public key registered', 'success');
-            }
+        const loader = createKeypairLoader(address);
+        registerPublicKey(keyReg, address, loader)
+          .then((registered) => {
+            if (registered) showToast('Public key registered', 'success');
           })
           .catch((err: unknown) => {
             console.warn('KeyRegistry setPubKey failed:', err);

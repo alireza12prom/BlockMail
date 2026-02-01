@@ -1,12 +1,9 @@
+import { useEffect } from 'react';
+import { ethers } from 'ethers';
 import { Email } from '../types';
 import { shortenAddress, formatTime } from '../utils/helpers';
-import { getKeyPair, decryptEmailPayload, bytes32ToPk } from '../utils/helpers';
-import { HARDHAT_ACCOUNTS, PINATA_JWT, PINATA_GATEWAY } from '../config/constants';
-import { useEffect, useState, useRef } from 'react';
-import { ethers } from 'ethers';
-import { PinataSDK } from 'pinata';
-
-const X25519_STORAGE_PREFIX = 'blockmail_x25519_sk_';
+import { HARDHAT_ACCOUNTS } from '../config/constants';
+import { useEmails } from '../hooks/useEmails';
 
 interface EmailListProps {
   userAddress: string;
@@ -16,133 +13,26 @@ interface EmailListProps {
   newSentEmail?: Email | null;
 }
 
-const pinata = new PinataSDK({
-  pinataJwt: PINATA_JWT,
-  pinataGateway: PINATA_GATEWAY
-})
+export function EmailList({
+  userAddress,
+  contract,
+  keyRegistry,
+  onEmailClick,
+  newSentEmail,
+}: EmailListProps) {
+  const {
+    emails,
+    isLoading,
+    isRefreshing,
+    refresh,
+    addEmail,
+  } = useEmails({ userAddress, contract, keyRegistry });
 
-
-const POLL_INTERVAL = 30; // seconds
-
-export function EmailList({ userAddress, contract, keyRegistry, onEmailClick, newSentEmail }: EmailListProps) {
-  const [emails, setEmails] = useState<Email[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Immediately add sent email when passed from ComposeForm
   useEffect(() => {
     if (newSentEmail) {
-      setEmails(prev => {
-        if (prev.some(e => e.cid === newSentEmail.cid)) {
-          return prev; // Already exists
-        }
-        return [newSentEmail, ...prev];
-      });
+      addEmail(newSentEmail);
     }
-  }, [newSentEmail]);
-
-  // Track the last block we've seen to poll for new events
-  const lastBlockRef = useRef<number>(0);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Manual refresh function
-  const handleRefresh = async () => {
-    if (isRefreshing) return;
-    setIsRefreshing(true);
-
-    try {
-      const provider = contract.runner?.provider;
-      if (!provider) return;
-
-      const currentBlock = await provider.getBlockNumber();
-
-      // Query for ALL events (full reload)
-      const loadedEmails = await loadEmails(userAddress, contract, keyRegistry);
-      setEmails(loadedEmails);
-
-      lastBlockRef.current = currentBlock;
-    } catch (error) {
-      console.error('Refresh error:', error);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    setIsLoading(true);
-    let pollInterval: NodeJS.Timeout;
-
-    const pollForEvents = async () => {
-      try {
-        const provider = contract.runner?.provider;
-        if (!provider) return;
-
-        const currentBlock = await provider.getBlockNumber();
-        if (currentBlock <= lastBlockRef.current) return;
-
-        // Query for new events since last block
-        const filterToMe = contract.filters.Message(null, userAddress);
-        const filterFromMe = contract.filters.Message(userAddress, null);
-
-        const [eventsTo, eventsFrom] = await Promise.all([
-          contract.queryFilter(filterToMe, lastBlockRef.current + 1, currentBlock),
-          contract.queryFilter(filterFromMe, lastBlockRef.current + 1, currentBlock)
-        ]);
-
-        const newEvents = [...eventsTo, ...eventsFrom];
-
-        for (const ev of newEvents) {
-          const args = (ev as any).args;
-          const cid = args.cid;
-          const from = args.from;
-
-          // Fetch and add new email
-          const isSender = from.toLowerCase() === userAddress.toLowerCase();
-          const email = await fetchEmailByCid(cid, isSender ? 'sent' : 'received', userAddress, keyRegistry);
-          email.direction = isSender ? 'sent' : 'received';
-
-          setEmails(prev => {
-            if (prev.some(e => e.cid === cid)) return prev;
-            console.log('New email received:', email.subject);
-            return [email, ...prev];
-          });
-        }
-
-        lastBlockRef.current = currentBlock;
-      } catch (error) {
-        console.error('Polling error:', error);
-      }
-    };
-
-    const init = async () => {
-      try {
-        // Load existing emails
-        const loadedEmails = await loadEmails(userAddress, contract, keyRegistry);
-        setEmails(loadedEmails);
-        setIsLoading(false);
-
-        // Get current block number
-        const provider = contract.runner?.provider;
-        if (provider) {
-          lastBlockRef.current = await provider.getBlockNumber();
-        }
-
-        // Set up polling for new events
-        pollInterval = setInterval(pollForEvents, POLL_INTERVAL * 1000);
-
-      } catch (error) {
-        console.error('Error loading emails:', error);
-        setIsLoading(false);
-      }
-    };
-
-    init();
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-    };
-  }, [contract, userAddress]);
-
-
+  }, [newSentEmail, addEmail]);
 
   return (
     <section className="flex-1 bg-dark-card rounded-2xl border border-white/10 shadow-xl overflow-hidden flex flex-col">
@@ -153,7 +43,7 @@ export function EmailList({ userAddress, contract, keyRegistry, onEmailClick, ne
         </h2>
         <div className="flex items-center gap-2">
           <button
-            onClick={handleRefresh}
+            onClick={refresh}
             disabled={isRefreshing}
             className="p-1.5 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50"
             title="Refresh inbox"
@@ -179,7 +69,7 @@ export function EmailList({ userAddress, contract, keyRegistry, onEmailClick, ne
         ) : emails.length === 0 ? (
           <EmptyState />
         ) : (
-          emails.map(email => (
+          emails.map((email) => (
             <EmailItem
               key={email.id}
               email={email}
@@ -229,16 +119,9 @@ function EmailItem({ email, onClick }: EmailItemProps) {
   return (
     <div
       onClick={onClick}
-      className={`
-        px-6 py-4 border-b border-white/5 cursor-pointer transition-all duration-200
-        relative group hover:bg-dark-card-hover
-      `}
+      className="px-6 py-4 border-b border-white/5 cursor-pointer transition-all duration-200 relative group hover:bg-dark-card-hover"
     >
-      {/* Left accent bar */}
-      <div className={`
-        absolute left-0 top-0 bottom-0 w-0.5 transition-all duration-200
-        bg-transparent group-hover:bg-primary/50
-      `} />
+      <div className="absolute left-0 top-0 bottom-0 w-0.5 transition-all duration-200 bg-transparent group-hover:bg-primary/50" />
 
       <div className="flex justify-between items-center mb-1">
         <div className="flex items-center gap-2">
@@ -251,20 +134,16 @@ function EmailItem({ email, onClick }: EmailItemProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           )}
-          <span className={`
-            text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded
-            ${email.direction === 'sent'
-              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-              : 'bg-primary/10 text-primary-light border border-primary/20'
-            }
-          `}>
+          <span
+            className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded ${email.direction === 'sent'
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                : 'bg-primary/10 text-primary-light border border-primary/20'
+              }`}
+          >
             {email.direction}
           </span>
           <span className="text-sm font-semibold text-slate-200">
-            {email.direction === 'sent'
-              ? shortenAddress(email.to)
-              : shortenAddress(email.from)
-            }
+            {email.direction === 'sent' ? shortenAddress(email.to) : shortenAddress(email.from)}
           </span>
         </div>
         <span className="text-xs text-slate-500">{formatTime(email.timestamp)}</span>
@@ -274,117 +153,4 @@ function EmailItem({ email, onClick }: EmailItemProps) {
       <div className="text-xs text-slate-500 truncate">{email.body}</div>
     </div>
   );
-}
-
-async function loadEmails(
-  userAddress: string,
-  contract: ethers.Contract,
-  keyRegistry: ethers.Contract | null
-): Promise<Email[]> {
-  const filterToMe = contract.filters.Message(null, userAddress);
-  const filterFromMe = contract.filters.Message(userAddress, null);
-
-  const eventsTo = await contract.queryFilter(filterToMe);
-  const eventsFrom = await contract.queryFilter(filterFromMe);
-
-  const receivedEmails = await Promise.all(
-    eventsTo.map(async (ev: any) => {
-      const email = await fetchEmailByCid(ev.args.cid, 'received', userAddress, keyRegistry, ev.args.timestamp);
-      email.direction = 'received';
-      return email;
-    })
-  );
-
-  const sentEmails = await Promise.all(
-    eventsFrom.map(async (ev: any) => {
-      const email = await fetchEmailByCid(ev.args.cid, 'sent', userAddress, keyRegistry, ev.args.timestamp);
-      email.direction = 'sent';
-      return email;
-    })
-  );
-
-  const allEmails = [...receivedEmails, ...sentEmails];
-  const uniqueEmails = allEmails.filter((email, index, self) =>
-    index === self.findIndex(e => e.cid === email.cid)
-  );
-
-  uniqueEmails.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-
-  return uniqueEmails;
-}
-
-async function fetchEmailByCid(
-  cid: string,
-  direction: 'sent' | 'received',
-  userAddress: string,
-  keyRegistry: ethers.Contract | null,
-  eventTimestamp?: bigint
-): Promise<Email> {
-  const data = (await pinata.gateways.public.get(cid)).data as any;
-
-  const from = data.from as string;
-  const to = data.to as string;
-
-  if (data.ciphertext != null && data.nonce != null) {
-    if (direction === 'received' && keyRegistry) {
-      try {
-        const loadSk = () =>
-          Promise.resolve(
-            (() => {
-              const raw = localStorage.getItem(X25519_STORAGE_PREFIX + userAddress.toLowerCase());
-              if (!raw) return null;
-              const arr = JSON.parse(raw) as number[];
-              return arr.length === 32 ? new Uint8Array(arr) : null;
-            })()
-          );
-        const saveSk = (sk: Uint8Array) =>
-          Promise.resolve(localStorage.setItem(X25519_STORAGE_PREFIX + userAddress.toLowerCase(), JSON.stringify(Array.from(sk))));
-
-        const { sk: recipientSk } = await getKeyPair(loadSk, saveSk);
-        const senderPkBytes32 = await keyRegistry.pk(from);
-        const zeroBytes32 = '0x' + '0'.repeat(64);
-        if (senderPkBytes32 && senderPkBytes32 !== zeroBytes32) {
-          const senderPk = bytes32ToPk(senderPkBytes32.slice(2));
-          const plain = await decryptEmailPayload(data.ciphertext, data.nonce, senderPk, recipientSk);
-          const parsed = JSON.parse(plain) as { subject: string; body: string; timestamp?: number };
-          return {
-            id: cid,
-            cid,
-            from,
-            to,
-            subject: parsed.subject,
-            body: parsed.body,
-            timestamp: parsed.timestamp ? new Date(parsed.timestamp) : new Date(),
-            read: false,
-            direction: 'received',
-          } as Email;
-        }
-      } catch (e) {
-        console.warn('Decrypt failed for CID', cid, e);
-      }
-    }
-    return {
-      id: cid,
-      cid,
-      from,
-      to,
-      subject: 'Encrypted message',
-      body: '(Encrypted)',
-      timestamp: eventTimestamp != null ? new Date(Number(eventTimestamp) * 1000) : new Date(),
-      read: false,
-      direction,
-    } as Email;
-  }
-
-  return {
-    id: cid,
-    cid,
-    from,
-    to,
-    subject: data.subject ?? '',
-    body: data.body ?? '',
-    timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
-    read: false,
-    direction,
-  } as Email;
 }
