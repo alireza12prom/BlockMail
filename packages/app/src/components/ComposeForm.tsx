@@ -3,11 +3,20 @@ import { ethers } from 'ethers';
 import { Email } from '../types';
 import { PinataSDK } from 'pinata';
 import { PINATA_JWT, PINATA_GATEWAY } from '../config/constants';
+import {
+  getKeyPair,
+  encryptEmailPayload,
+  pkToBytes32,
+  bytes32ToPk,
+} from '../utils/helpers';
+
+const X25519_STORAGE_PREFIX = 'blockmail_x25519_sk_';
 
 interface ComposeFormProps {
   isConnected: boolean;
   userAddress: string;
   contract: ethers.Contract | null;
+  keyRegistry: ethers.Contract | null;
   onMessageSent: (email: Email) => void;
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
@@ -23,6 +32,7 @@ export function ComposeForm({
   isConnected,
   userAddress,
   contract,
+  keyRegistry,
   onMessageSent,
   onError,
   onSuccess,
@@ -41,6 +51,11 @@ export function ComposeForm({
       return;
     }
 
+    if (!keyRegistry) {
+      onError('KeyRegistry not configured');
+      return;
+    }
+
     if (!ethers.isAddress(recipient)) {
       onError('Invalid recipient address');
       return;
@@ -54,16 +69,55 @@ export function ComposeForm({
     setIsSending(true);
 
     try {
-      // Upload message to IPFS via Pinata
-      const cid = await uploadToPinata({
+      const loadSk = () =>
+        Promise.resolve(
+          (() => {
+            const raw = localStorage.getItem(X25519_STORAGE_PREFIX + userAddress.toLowerCase());
+            if (!raw) return null;
+            const arr = JSON.parse(raw) as number[];
+            return arr.length === 32 ? new Uint8Array(arr) : null;
+          })()
+        );
+      const saveSk = (sk: Uint8Array) =>
+        Promise.resolve(localStorage.setItem(X25519_STORAGE_PREFIX + userAddress.toLowerCase(), JSON.stringify(Array.from(sk))));
+
+      const { pk: senderPk, sk: senderSk } = await getKeyPair(loadSk, saveSk);
+      console.log('My KeyPair: ', { senderPk, senderSk });
+
+      const recipientPkBytes32 = await keyRegistry.pk(recipient);
+      const zeroBytes32 = '0x' + '0'.repeat(64);
+      if (!recipientPkBytes32 || recipientPkBytes32 === zeroBytes32) {
+        onError('Recipient has not registered a public key');
+        setIsSending(false);
+        return;
+      }
+
+      const recipientPk = bytes32ToPk(recipientPkBytes32.slice(2));
+
+      const payload = JSON.stringify({
         from: userAddress,
         to: recipient,
         subject,
-        body
+        body,
+        timestamp: Date.now(),
       });
-      console.log('Uploaded to IPFS with CID:', cid);
+      const { nonce, ciphertext } = await encryptEmailPayload(payload, recipientPk, senderSk);
 
-      console.log(recipient)
+      const pkHex = pkToBytes32(senderPk);
+      const currentPk = await keyRegistry.pk(userAddress);
+      if (!currentPk || currentPk === zeroBytes32 || currentPk !== '0x' + pkHex) {
+        const txSet = await keyRegistry.setPubKey('0x' + pkHex);
+        await txSet.wait();
+      }
+
+      const cid = await uploadToPinataEncrypted({
+        from: userAddress,
+        to: recipient,
+        nonce,
+        ciphertext,
+      });
+      console.log('Uploaded encrypted to IPFS with CID:', cid);
+
       const tx = await contract.sendMessage(recipient, cid);
       await tx.wait();
 
@@ -177,19 +231,17 @@ export function ComposeForm({
   );
 }
 
-async function uploadToPinata(data: {
+async function uploadToPinataEncrypted(data: {
   from: string;
   to: string;
-  subject: string;
-  body: string;
+  nonce: string;
+  ciphertext: string;
 }): Promise<string> {
   const result = await pinata.upload.public.json({
     from: data.from,
     to: data.to,
-    subject: data.subject,
-    body: data.body,
-    timestamp: Date.now()
+    nonce: data.nonce,
+    ciphertext: data.ciphertext,
   });
-
   return result.cid;
 }

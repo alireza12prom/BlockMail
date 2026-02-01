@@ -1,13 +1,17 @@
 import { Email } from '../types';
 import { shortenAddress, formatTime } from '../utils/helpers';
+import { getKeyPair, decryptEmailPayload, bytes32ToPk } from '../utils/helpers';
 import { HARDHAT_ACCOUNTS, PINATA_JWT, PINATA_GATEWAY } from '../config/constants';
 import { useEffect, useState, useRef } from 'react';
 import { ethers } from 'ethers';
 import { PinataSDK } from 'pinata';
 
+const X25519_STORAGE_PREFIX = 'blockmail_x25519_sk_';
+
 interface EmailListProps {
-  userAddress: string,
-  contract: ethers.Contract,
+  userAddress: string;
+  contract: ethers.Contract;
+  keyRegistry: ethers.Contract | null;
   onEmailClick: (email: Email) => void;
   newSentEmail?: Email | null;
 }
@@ -20,7 +24,7 @@ const pinata = new PinataSDK({
 
 const POLL_INTERVAL = 30; // seconds
 
-export function EmailList({ userAddress, contract, onEmailClick, newSentEmail }: EmailListProps) {
+export function EmailList({ userAddress, contract, keyRegistry, onEmailClick, newSentEmail }: EmailListProps) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -52,7 +56,7 @@ export function EmailList({ userAddress, contract, onEmailClick, newSentEmail }:
       const currentBlock = await provider.getBlockNumber();
 
       // Query for ALL events (full reload)
-      const loadedEmails = await loadEmails(userAddress, contract);
+      const loadedEmails = await loadEmails(userAddress, contract, keyRegistry);
       setEmails(loadedEmails);
 
       lastBlockRef.current = currentBlock;
@@ -92,8 +96,8 @@ export function EmailList({ userAddress, contract, onEmailClick, newSentEmail }:
           const from = args.from;
 
           // Fetch and add new email
-          const email = await fetchEmailByCid(cid);
           const isSender = from.toLowerCase() === userAddress.toLowerCase();
+          const email = await fetchEmailByCid(cid, isSender ? 'sent' : 'received', userAddress, keyRegistry);
           email.direction = isSender ? 'sent' : 'received';
 
           setEmails(prev => {
@@ -112,7 +116,7 @@ export function EmailList({ userAddress, contract, onEmailClick, newSentEmail }:
     const init = async () => {
       try {
         // Load existing emails
-        const loadedEmails = await loadEmails(userAddress, contract);
+        const loadedEmails = await loadEmails(userAddress, contract, keyRegistry);
         setEmails(loadedEmails);
         setIsLoading(false);
 
@@ -272,53 +276,115 @@ function EmailItem({ email, onClick }: EmailItemProps) {
   );
 }
 
-async function loadEmails(userAddress: string, contract: ethers.Contract): Promise<Email[]> {
+async function loadEmails(
+  userAddress: string,
+  contract: ethers.Contract,
+  keyRegistry: ethers.Contract | null
+): Promise<Email[]> {
   const filterToMe = contract.filters.Message(null, userAddress);
   const filterFromMe = contract.filters.Message(userAddress, null);
 
   const eventsTo = await contract.queryFilter(filterToMe);
   const eventsFrom = await contract.queryFilter(filterFromMe);
 
-  // Process received emails
   const receivedEmails = await Promise.all(
     eventsTo.map(async (ev: any) => {
-      const email = await fetchEmailByCid(ev.args.cid);
+      const email = await fetchEmailByCid(ev.args.cid, 'received', userAddress, keyRegistry, ev.args.timestamp);
       email.direction = 'received';
       return email;
     })
   );
 
-  // Process sent emails
   const sentEmails = await Promise.all(
     eventsFrom.map(async (ev: any) => {
-      const email = await fetchEmailByCid(ev.args.cid);
+      const email = await fetchEmailByCid(ev.args.cid, 'sent', userAddress, keyRegistry, ev.args.timestamp);
       email.direction = 'sent';
       return email;
     })
   );
 
-  // Combine and deduplicate (in case user sent to themselves)
   const allEmails = [...receivedEmails, ...sentEmails];
   const uniqueEmails = allEmails.filter((email, index, self) =>
     index === self.findIndex(e => e.cid === email.cid)
   );
 
-  // Sort by timestamp descending
   uniqueEmails.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
   return uniqueEmails;
 }
 
-async function fetchEmailByCid(cid: string): Promise<Email> {
+async function fetchEmailByCid(
+  cid: string,
+  direction: 'sent' | 'received',
+  userAddress: string,
+  keyRegistry: ethers.Contract | null,
+  eventTimestamp?: bigint
+): Promise<Email> {
   const data = (await pinata.gateways.public.get(cid)).data as any;
+
+  const from = data.from as string;
+  const to = data.to as string;
+
+  if (data.ciphertext != null && data.nonce != null) {
+    if (direction === 'received' && keyRegistry) {
+      try {
+        const loadSk = () =>
+          Promise.resolve(
+            (() => {
+              const raw = localStorage.getItem(X25519_STORAGE_PREFIX + userAddress.toLowerCase());
+              if (!raw) return null;
+              const arr = JSON.parse(raw) as number[];
+              return arr.length === 32 ? new Uint8Array(arr) : null;
+            })()
+          );
+        const saveSk = (sk: Uint8Array) =>
+          Promise.resolve(localStorage.setItem(X25519_STORAGE_PREFIX + userAddress.toLowerCase(), JSON.stringify(Array.from(sk))));
+
+        const { sk: recipientSk } = await getKeyPair(loadSk, saveSk);
+        const senderPkBytes32 = await keyRegistry.pk(from);
+        const zeroBytes32 = '0x' + '0'.repeat(64);
+        if (senderPkBytes32 && senderPkBytes32 !== zeroBytes32) {
+          const senderPk = bytes32ToPk(senderPkBytes32.slice(2));
+          const plain = await decryptEmailPayload(data.ciphertext, data.nonce, senderPk, recipientSk);
+          const parsed = JSON.parse(plain) as { subject: string; body: string; timestamp?: number };
+          return {
+            id: cid,
+            cid,
+            from,
+            to,
+            subject: parsed.subject,
+            body: parsed.body,
+            timestamp: parsed.timestamp ? new Date(parsed.timestamp) : new Date(),
+            read: false,
+            direction: 'received',
+          } as Email;
+        }
+      } catch (e) {
+        console.warn('Decrypt failed for CID', cid, e);
+      }
+    }
+    return {
+      id: cid,
+      cid,
+      from,
+      to,
+      subject: 'Encrypted message',
+      body: '(Encrypted)',
+      timestamp: eventTimestamp != null ? new Date(Number(eventTimestamp) * 1000) : new Date(),
+      read: false,
+      direction,
+    } as Email;
+  }
 
   return {
     id: cid,
     cid,
-    from: data.from,
-    to: data.to,
-    subject: data.subject,
-    body: data.body,
-    timestamp: new Date(data.timestamp),
+    from,
+    to,
+    subject: data.subject ?? '',
+    body: data.body ?? '',
+    timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+    read: false,
+    direction,
   } as Email;
 }

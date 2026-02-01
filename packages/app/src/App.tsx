@@ -18,6 +18,7 @@ function App() {
   const {
     isConnected,
     contract,
+    keyRegistry,
     userAddress,
     networkName,
     isReconnecting,
@@ -81,6 +82,7 @@ function App() {
             <EmailList
               userAddress={userAddress}
               contract={contract!}
+              keyRegistry={keyRegistry}
               onEmailClick={handleEmailClick}
               newSentEmail={newSentEmail}
             />
@@ -88,6 +90,7 @@ function App() {
               isConnected={isConnected}
               userAddress={userAddress}
               contract={contract}
+              keyRegistry={keyRegistry}
               onMessageSent={(email) => {
                 addEmail(email);
                 setNewSentEmail(email);

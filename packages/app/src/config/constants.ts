@@ -56,6 +56,35 @@ export const CONTRACT_ABI = [
 // Contract address (from environment variables)
 export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 
+// KeyRegistry: address -> X25519 public key (bytes32)
+export const KEY_REGISTRY_ADDRESS = import.meta.env.VITE_KEY_REGISTRY_ADDRESS;
+
+export const KEY_REGISTRY_ABI = [
+  {
+    inputs: [{ internalType: 'bytes32', name: 'pubKey', type: 'bytes32' }],
+    name: 'setPubKey',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'address', name: '', type: 'address' }],
+    name: 'pk',
+    outputs: [{ internalType: 'bytes32', name: '', type: 'bytes32' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: 'address', name: 'user', type: 'address' },
+      { indexed: false, internalType: 'bytes32', name: 'pubKey', type: 'bytes32' },
+    ],
+    name: 'PubKeySet',
+    type: 'event',
+  },
+] as const;
+
 // RPC URLs (from environment variables)
 export const RPC_URL = import.meta.env.VITE_RPC_URL;
 export const WS_URL = import.meta.env.VITE_WS_URL;
