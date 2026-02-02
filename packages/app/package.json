@@ -46,7 +46,6 @@
     "vite": "^5.4.21"
   },
   "dependencies": {
-    "@metamask/sdk": "^0.34.0",
     "electron-squirrel-startup": "^1.0.1",
     "ethers": "^6.16.0",
     "libsodium-wrappers": "^0.8.2",
