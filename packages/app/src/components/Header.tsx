@@ -20,9 +20,9 @@ export function Header({
 }: HeaderProps) {
   return (
     <header className="sticky top-0 z-50 bg-dark-card/80 backdrop-blur-xl border-b border-white/10 px-6 py-4">
-      <div className="max-w-7xl mx-auto flex justify-between items-center">
+      <div className="max-w-6xl mx-auto flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">BlockMail</h1>
+          <h1 className="text-2xl font-extrabold">BlockMail</h1>
         </div>
 
         <div className="flex items-center gap-3">

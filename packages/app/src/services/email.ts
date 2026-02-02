@@ -1,13 +1,10 @@
-/**
- * High-level email operations: send (encrypt + upload + on-chain), load list, fetch by CID.
- */
-
 import type { Contract } from 'ethers';
 import { Email } from '../types';
-import { bytes32ToPk, pkToBytes32 } from '../utils/helpers';
-import { KeyRegistryService } from './keyRegistry';
 import { ipfs } from './ipfs';
 import sodium from 'libsodium-wrappers';
+import { sessionService } from './session';
+import { KeyRegistryService } from './keyRegistry';
+import { bytes32ToPk, pkToBytes32 } from '../utils/helpers';
 
 export class EmailService {
   constructor(
@@ -15,8 +12,9 @@ export class EmailService {
     private keyRegistry: KeyRegistryService,
   ) {}
 
-  async send(address: string, params: SendEmailParams): Promise<Email> {
+  async send(params: SendEmailParams): Promise<Email> {
     const now = Date.now();
+    const address = sessionService.current!.wallet.address;
     
     const payload = JSON.stringify({
       subject: params.subject,
@@ -54,7 +52,9 @@ export class EmailService {
     }
   }
 
-  async load(address: string): Promise<Email[]> {
+  async load(): Promise<Email[]> {
+    const address = sessionService.current!.wallet.address;
+
     const filterToMe = this.emailContract.filters.Message(null, address);
     const filterFromMe = this.emailContract.filters.Message(address, null);
 
@@ -65,13 +65,13 @@ export class EmailService {
 
     const received = await Promise.all(
       eventsTo.map(async (ev) => {
-        return this.getOne(address, { cid: ev.args.cid, direction: 'received' });
+        return this.getOne({ cid: ev.args.cid, direction: 'received' });
       })
     );
 
     const sent = await Promise.all(
       eventsFrom.map(async (ev) => {
-        return this.getOne(address, { cid: ev.args.cid, direction: 'sent' });
+        return this.getOne({ cid: ev.args.cid, direction: 'sent' });
       })
     );
 
@@ -81,8 +81,9 @@ export class EmailService {
     ].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   }
 
-
-  async getOne(address: string, params: GetOneParams): Promise<Email> {
+  async getOne(params: GetOneParams): Promise<Email> {
+    const address = sessionService.current!.wallet.address;
+    
     const payload = await ipfs.get(params.cid);
     if (!payload) throw new Error('Email not found');
 
@@ -100,8 +101,8 @@ export class EmailService {
       }
     }
 
+    const sk = bytes32ToPk(sessionService.current!.keypair.sk);
     const pk = await this.keyRegistry.getPubKey(address);
-    const sk = await this.keyRegistry.getSecKey(address);
     if (!pk || !sk) throw new Error('Key not found');
 
     const plain = await this.decrypt(

@@ -13,7 +13,6 @@ interface EmailListProps {
 }
 
 export function EmailList({
-  userAddress,
   emailService,
   onEmailClick,
   newSentEmail,
@@ -25,7 +24,7 @@ export function EmailList({
     isRefreshing,
     refresh,
     addEmail,
-  } = useEmails({ userAddress, emailService });
+  } = useEmails({ emailService });
 
   useEffect(() => {
     if (newSentEmail) {

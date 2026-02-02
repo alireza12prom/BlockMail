@@ -58,7 +58,6 @@ export function ComposeModal({
           <ComposeForm
             hideHeader
             isConnected={isConnected}
-            userAddress={userAddress}
             emailService={emailService}
             onMessageSent={(email) => {
               onMessageSent(email);

@@ -1,45 +1,9 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { Email, Session } from '../types';
-import { pickRandomAvatar } from '../config/avatars';
 import { CONTRACT_ABI, CONTRACT_ADDRESS, KEY_REGISTRY_ABI, KEY_REGISTRY_ADDRESS, RPC_URL } from '../config/constants';
-import { EmailService, KeyRegistryService , storage} from '../services';
-
-const MAX_CACHED_SESSIONS = 3;
-
-function getCachedSessionsList(): Session[] {
-  const raw = storage.get('sessions', 'list');
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (s: unknown): s is Session =>
-        s != null &&
-        typeof s === 'object' &&
-        'wallet' in s &&
-        typeof (s as Session).wallet === 'object' &&
-        typeof (s as Session).wallet?.address === 'string' &&
-        typeof (s as Session).wallet?.pk === 'string' &&
-        'keypair' in s &&
-        typeof (s as Session).keypair === 'object' &&
-        typeof (s as Session).keypair?.pk === 'string' &&
-        typeof (s as Session).keypair?.sk === 'string'
-    );
-  } catch {
-    return [];
-  }
-} 
-
-function writeKeypairFromSession(address: string, session: Session): void {
-  try {
-    const pk = JSON.parse(session.keypair.pk) as number[];
-    const sk = JSON.parse(session.keypair.sk) as number[];
-    storage.set('keypair', address, JSON.stringify({ pk, sk }));
-  } catch {
-    // ignore
-  }
-}
+import { EmailService, KeyRegistryService} from '../services';
+import { sessionService } from '../services/session';
 
 const ONE_ETH = BigInt(1e18);
 async function fundAddressIfHardhat(provider: ethers.JsonRpcProvider, address: string): Promise<void> {
@@ -71,8 +35,8 @@ interface UseWalletReturn {
   reconnectCachedWallet: (address: string) => Promise<void>;
   disconnect: () => void;
   addEmail: (email: Email) => void;
-  emailService: EmailService | null;
-  keyRegistryService: KeyRegistryService | null;
+  emailService: EmailService | undefined;
+  keyRegistryService: KeyRegistryService | undefined;
 }
 
 export function useWallet(
@@ -85,15 +49,13 @@ export function useWallet(
   const [networkName, setNetworkName] = useState('');
   const [emails, setEmails] = useState<Email[]>([]);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const [keyRegistryService, setKeyRegistryService] = useState<KeyRegistryService | null>(null);
-  const [emailService, setEmailService] = useState<EmailService | null>(null);
+  const [keyRegistryService, setKeyRegistryService] = useState<KeyRegistryService>();
+  const [emailService, setEmailService] = useState<EmailService>();
   const [avatar, setAvatar] = useState<string | null>(null);
   const [cachedWallets, setCachedWallets] = useState<{ address: string; avatar: string | null }[]>(() => {
-    const list = getCachedSessionsList();
-    return list.map((s) => ({ address: s.wallet.address, avatar: s.avatar ?? null })).slice(0, MAX_CACHED_SESSIONS);
+    const list = sessionService.load();
+    return list.map((s) => ({address: s.wallet.address, avatar: s.avatar ?? null }));
   });
-  const hasRestoredRef = useRef(false);
-
 
   const connectWithWallet = useCallback(
     async (wallet: SignerLike) => {
@@ -106,47 +68,39 @@ export function useWallet(
         await fundAddressIfHardhat(provider, address);
 
         const blockMail = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-        const keyReg = KEY_REGISTRY_ADDRESS
-          ? new ethers.Contract(KEY_REGISTRY_ADDRESS, KEY_REGISTRY_ABI, signer)
-          : null;
-
+        const keyReg = new ethers.Contract(KEY_REGISTRY_ADDRESS, KEY_REGISTRY_ABI, signer);
+        const keyRegSvc = new KeyRegistryService(keyReg);
+        const emailSvc = new EmailService(blockMail, keyRegSvc);
+      
         setContract(blockMail);
         setKeyRegistry(keyReg);
         setUserAddress(address);
-        setNetworkName('Hardhat Local');
+        setNetworkName('Local');
         setIsConnected(true);
-
-        const keyRegSvc = keyReg ? new KeyRegistryService(keyReg) : null;
-        const emailSvc = keyRegSvc ? new EmailService(blockMail, keyRegSvc) : null;
         setKeyRegistryService(keyRegSvc);
         setEmailService(emailSvc);
 
         showToast('Wallet connected', 'success');
-
-        if (keyRegSvc) {
-          await keyRegSvc.init(address);
-        }
-
-        // Cache session (wallet + keypair) under key "sessions"
+        
         try {
-          const keypairRaw = storage.get('keypair', address);
-          if (keypairRaw) {
-            const { pk, sk } = JSON.parse(keypairRaw) as { pk: number[]; sk: number[] };
-            let list = getCachedSessionsList();
-            const existing = list.find((s) => s.wallet.address.toLowerCase() === address.toLowerCase());
-            const session: Session = {
+          let session = sessionService.find(address);
+          if (!session) {
+            const { pk, sk } = await keyRegSvc.init(address);
+
+            session = sessionService.save({
               wallet: { address, pk: wallet.privateKey },
-              keypair: { pk: JSON.stringify(pk), sk: JSON.stringify(sk) },
-              avatar: existing?.avatar ?? pickRandomAvatar(),
-            };
-            list = list.filter((s) => s.wallet.address.toLowerCase() !== address.toLowerCase());
-            list.unshift(session);
-            list = list.slice(0, MAX_CACHED_SESSIONS);
-            storage.set('sessions', 'list', JSON.stringify(list));
-            setCachedWallets(list.map((s) => ({ address: s.wallet.address, avatar: s.avatar ?? null })));
-            setAvatar(session.avatar ?? null);
+              keypair: { pk, sk },
+            });
           }
-          storage.del('disconnected', 'key');
+          
+          sessionService.current = session;
+
+          const sessions = sessionService.load();
+          setCachedWallets(sessions.map((s) => (
+            { address: s.wallet.address, avatar: s.avatar ?? null })
+          ));
+
+          setAvatar(session.avatar ?? null);
         } catch {
           // ignore storage errors
         }
@@ -160,30 +114,22 @@ export function useWallet(
 
   // Restore cached session on mount only if user did not explicitly disconnect
   useEffect(() => {
-    if (hasRestoredRef.current) return;
-    hasRestoredRef.current = true;
+    const currentSession = sessionService.current; 
+    if (!currentSession) return;
 
-    if (storage.get('disconnected', 'key') === 'true') return;
-
-    const list = getCachedSessionsList();
-    if (list.length === 0) return;
-
-    const first = list[0];
-    if (!first?.wallet?.pk) return;
-
-    writeKeypairFromSession(first.wallet.address, first);
     setIsReconnecting(true);
-    const wallet = new ethers.Wallet(first.wallet.pk);
+
+    const wallet = new ethers.Wallet(currentSession.wallet.pk);
     connectWithWallet(wallet).finally(() => setIsReconnecting(false));
   }, [connectWithWallet]);
 
   // Reconnect using a cached session by address
   const reconnectCachedWallet = useCallback(
     async (address: string) => {
-      const list = getCachedSessionsList();
-      const session = list.find((s) => s.wallet.address.toLowerCase() === address.toLowerCase());
-      if (!session?.wallet?.pk) return;
-      writeKeypairFromSession(session.wallet.address, session);
+      const session = sessionService.find(address);
+      if (!session) return;
+
+      sessionService.current = session;
       setIsReconnecting(true);
       try {
         const wallet = new ethers.Wallet(session.wallet.pk);
@@ -200,7 +146,8 @@ export function useWallet(
     if (contract) {
       contract.removeAllListeners();
     }
-    storage.set('disconnected', 'key', 'true');
+
+    sessionService.current = null;
 
     setIsConnected(false);
     setContract(null);

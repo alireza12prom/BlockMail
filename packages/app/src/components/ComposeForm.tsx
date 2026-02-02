@@ -5,19 +5,16 @@ import { EmailService } from '../services';
 
 interface ComposeFormProps {
   isConnected: boolean;
-  userAddress: string;
   emailService: EmailService;
   onMessageSent: (email: Email) => void;
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
   initialRecipient?: string;
-  /** When true, the form does not render its own "Compose" header (e.g. when inside a modal). */
   hideHeader?: boolean;
 }
 
 export function ComposeForm({
   isConnected,
-  userAddress,
   emailService,
   onMessageSent,
   onError,
@@ -44,7 +41,7 @@ export function ComposeForm({
 
     setIsSending(true);
     try {
-      const sentEmail = await emailService.send(userAddress, {
+      const sentEmail = await emailService.send({
         destination: recipient,
         subject: subject.trim(),
         body: body.trim(),

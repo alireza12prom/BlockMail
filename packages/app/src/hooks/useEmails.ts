@@ -8,11 +8,9 @@ import { Email } from '../types';
 import { EmailService } from '../services';
 import { useWatchContractEvent } from 'wagmi';
 import { CONTRACT_ABI } from '../config/constants';
-
-const POLL_INTERVAL_MS = 30 * 1000;
+import { sessionService } from '../services/session';
 
 export interface UseEmailsParams {
-  userAddress: string;
   emailService: EmailService;
 }
 
@@ -25,7 +23,6 @@ export interface UseEmailsReturn {
 }
 
 export function useEmails({
-  userAddress,
   emailService,
 }: UseEmailsParams): UseEmailsReturn {
   const [emails, setEmails] = useState<Email[]>([]);
@@ -33,9 +30,10 @@ export function useEmails({
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const list = await emailService.load(userAddress);
+    const list = await emailService.load();
+    console.log(list)
     setEmails(list);
-  }, [userAddress, emailService]);
+  }, [emailService]);
 
   const refresh = useCallback(async () => {
     if (isRefreshing) return;
@@ -58,39 +56,9 @@ export function useEmails({
   }, []);
 
   useEffect(() => {
-    if (!userAddress) {
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    let pollInterval: ReturnType<typeof setInterval>;
-
-    const pollForEvents = async () => {
-      try {
-        const newEmails = await emailService.load(userAddress);
-        setEmails(newEmails);
-      } catch (error) {
-        console.error('Polling error:', error);
-      }
-    };
-
-    const init = async () => {
-      try {
-        await load();
-        pollInterval = setInterval(pollForEvents, POLL_INTERVAL_MS);
-      } catch (error) {
-        console.error('Error loading emails:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    init();
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-    };
-  }, [userAddress, load]);
+    load();
+    setIsLoading(false);
+  }, [emailService])
 
   useWatchContractEvent({
     address: import.meta.env.VITE_CONTRACT_ADDRESS as `0x${string}`,
@@ -99,11 +67,12 @@ export function useEmails({
     onLogs(logs) {
       logs.forEach(async (log) => {
         const {cid, to} = log.args as any;
-        if (to != userAddress) return;
+        const address = sessionService.current!.wallet.address;
+        
+        if (to != address) return;
         console.log('New message received: ', log.args);
 
         const email = await emailService.getOne(
-          userAddress, 
           { cid: cid, direction: 'received' }
         );
 
