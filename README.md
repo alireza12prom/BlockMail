@@ -8,8 +8,6 @@ A decentralized email system built on Ethereum blockchain with IPFS storage. Sen
 - **IPFS Storage**: Message content stored on IPFS via Pinata for permanent, decentralized storage
 - **On-Chain Records**: Message metadata (sender, recipient, timestamp, IPFS CID) recorded on Ethereum
 - **Desktop Application**: Native Electron app with modern React UI
-- **Real-Time Updates**: WebSocket-based event polling for instant message notifications
-- **Wallet Integration**: Connect via MetaMask or use development accounts
 
 ## Architecture
 
@@ -51,7 +49,6 @@ blockmail/
 
 - Node.js >= 18.0.0
 - npm >= 9.0.0
-- MetaMask browser extension (for production use)
 
 ---
 
@@ -137,42 +134,6 @@ The BlockMail desktop app window should open. You can use the local Hardhat acco
 
 ---
 
-### Optional: Run node and app together
-
-To start the Hardhat node and the app with one command (you still need to deploy contracts once in another terminal):
-
-```bash
-npm run dev
-```
-
-Then in another terminal run `npm run contracts:deploy:local`, update `.env` if the addresses differ, and the app will already be connected to the local chain.
-
----
-
-## Tech Stack
-
-### Application
-- **Electron** - Desktop application framework
-- **React** - UI library
-- **TypeScript** - Type-safe JavaScript
-- **Vite** - Build tool
-- **Tailwind CSS** - Utility-first CSS framework
-- **ethers.js** - Ethereum library
-- **Pinata SDK** - IPFS pinning service
-
-### Smart Contracts
-- **Solidity** - Smart contract language
-- **Hardhat** - Development framework
-- **Hardhat Ignition** - Deployment system
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [Ethereum](https://ethereum.org/) - Blockchain platform
-- [IPFS](https://ipfs.io/) - Distributed storage
-- [Pinata](https://pinata.cloud/) - IPFS pinning service
-- [Hardhat](https://hardhat.org/) - Ethereum development environment
-- [Electron](https://www.electronjs.org/) - Desktop application framework
