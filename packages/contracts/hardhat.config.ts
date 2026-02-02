@@ -24,16 +24,6 @@ export default defineConfig({
       type: "http",
       url: "http://127.0.0.1:8545",
     },
-    // Used when deploying from Docker; ETH_RPC_URL points to the blockchain container
-    docker: {
-      type: "http",
-      url: process.env.ETH_RPC_URL ?? "http://blockchain:8545",
-      accounts: {
-        mnemonic:
-          process.env.DEPLOY_MNEMONIC ??
-          "test test test test test test test test test test test junk",
-      },
-    },
     sepolia: {
       type: "http",
       chainType: "l1",

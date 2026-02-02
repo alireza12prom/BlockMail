@@ -36,7 +36,6 @@ blockmail/
 │   │   │   ├── components/   # React components
 │   │   │   ├── hooks/        # Custom React hooks
 │   │   │   ├── config/       # Configuration & constants
-│   │   │   ├── types/        # TypeScript types
 │   │   │   └── utils/        # Helper utilities
 │   │   └── ...
 │   └── contracts/        # Solidity smart contracts
@@ -44,7 +43,6 @@ blockmail/
 │       ├── ignition/         # Deployment modules
 │       ├── scripts/          # Deployment scripts
 │       └── test/             # Contract tests
-├── docker-compose.yml    # Run local blockchain in Docker
 ├── package.json          # Root workspace config
 └── README.md
 ```
@@ -55,98 +53,101 @@ blockmail/
 - npm >= 9.0.0
 - MetaMask browser extension (for production use)
 
-## Getting Started
+---
 
-### 1. Install Dependencies
+## How to Run the Project (Step by Step)
+
+Follow these steps to run BlockMail manually: from deploying the contracts to starting the Electron app.
+
+### Step 1: Install dependencies
+
+From the repo root:
 
 ```bash
 npm install
 ```
 
-### 2. Set Up Environment Variables
+### Step 2: Configure the app environment
 
-Create environment files for the app:
+Create the app env file and set contract addresses and RPC URLs (you’ll fill in the contract addresses after deploying in Step 5):
 
 ```bash
 cp packages/app/.env.example packages/app/.env
 ```
 
-Edit `packages/app/.env` with your configuration:
+Edit `packages/app/.env`. For local development you’ll typically use:
 
 ```env
-# Contract address (use default for local development)
+# Contract addresses (update after Step 5 with the addresses printed by the deploy script)
 VITE_CONTRACT_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
-
-# KeyRegistry contract - use the "KeyRegistry deployed to: 0x..." address from deploy script
 VITE_KEY_REGISTRY_ADDRESS=0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512
 
-# RPC URLs
+# Local Hardhat node
 VITE_RPC_URL=http://127.0.0.1:8545
 VITE_WS_URL=ws://127.0.0.1:8545
 
-# Pinata IPFS Configuration (get from https://app.pinata.cloud)
+# Pinata IPFS (get from https://app.pinata.cloud)
 VITE_PINATA_JWT=your_pinata_jwt_here
 VITE_PINATA_GATEWAY=your_gateway_subdomain.mypinata.cloud
 ```
 
-### 3. Start Local Blockchain
+### Step 3: Start the local blockchain
 
-In one terminal, start the Hardhat local node:
+In a **first terminal**, start the Hardhat node:
 
 ```bash
 npm run contracts:node
 ```
 
-### 4. Deploy Smart Contract
+Leave this running. The node will listen at `http://127.0.0.1:8545`.
 
-In another terminal, deploy the contract to your local node:
+### Step 4: Deploy the smart contracts
+
+In a **second terminal**, from the repo root, deploy to the local node:
 
 ```bash
 npm run contracts:deploy:local
 ```
 
-### 5. Start the Application
+The script will print something like:
+
+```
+BlockMail deployed to: 0x... chainId: 31337
+KeyRegistry deployed to: 0x... chainId: 31337
+```
+
+### Step 5: Update app env with deployed addresses
+
+Copy the **BlockMail** and **KeyRegistry** addresses from the deploy output into `packages/app/.env`:
+
+- `VITE_CONTRACT_ADDRESS` = BlockMail address
+- `VITE_KEY_REGISTRY_ADDRESS` = KeyRegistry address
+
+Save the file.
+
+### Step 6: Start the Electron app
+
+In the same second terminal (or a new one), from the repo root:
 
 ```bash
 npm run app:start
 ```
 
-Or run everything together:
+The BlockMail desktop app window should open. You can use the local Hardhat accounts (and their private keys in the Hardhat output) to connect and test.
+
+---
+
+### Optional: Run node and app together
+
+To start the Hardhat node and the app with one command (you still need to deploy contracts once in another terminal):
 
 ```bash
 npm run dev
 ```
 
-### Running with Docker
+Then in another terminal run `npm run contracts:deploy:local`, update `.env` if the addresses differ, and the app will already be connected to the local chain.
 
-Run the local Hardhat blockchain and deploy the contract in containers:
-
-```bash
-docker compose up -d
-```
-
-This starts:
-
-- **blockchain** – Hardhat node at `http://localhost:8545`
-- **deploy** – One-off job that deploys the BlockMail contract once the node is ready
-
-Then start the app on your host (the app is a desktop GUI, so it runs outside Docker):
-
-```bash
-npm run app:start
-```
-
-Ensure `packages/app/.env` uses `VITE_RPC_URL=http://127.0.0.1:8545` and `VITE_WS_URL=ws://127.0.0.1:8545`. The deploy job prints the contract address; if it differs from your default, set `VITE_CONTRACT_ADDRESS` in `.env` to match.
-
-#### Building the client app in Docker
-
-You can build the Electron app (Linux `.deb`, `.rpm`, etc.) inside Docker for reproducible or CI builds:
-
-```bash
-docker compose run --rm app-build
-```
-
-Artifacts are written to `packages/app/out/`. The desktop app itself is intended to run on your host (it’s a GUI); use this when you want to produce installers in a container.
+---
 
 ## Tech Stack
 

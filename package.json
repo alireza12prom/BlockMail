@@ -18,11 +18,7 @@
     "dev": "concurrently \"npm run contracts:node\" \"npm run app:start\"",
     "clean": "rm -rf node_modules packages/*/node_modules",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f",
-    "docker:app-build": "docker compose run --rm app-build"
+    "test": "npm run test --workspaces --if-present"
   },
   "keywords": [
     "blockchain",

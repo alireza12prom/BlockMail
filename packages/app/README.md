@@ -79,18 +79,6 @@ Create distributable installers:
 npm run make
 ```
 
-### Build in Docker
-
-Build Linux installers (`.deb`, `.rpm`, etc.) in a container (useful for CI or reproducible builds):
-
-```bash
-# From repo root
-docker compose run --rm app-build
-# or: npm run docker:app-build
-```
-
-Artifacts are written to `packages/app/out/`.
-
 ## Project Structure
 
 ```
