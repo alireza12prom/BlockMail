@@ -16,6 +16,12 @@ export interface ToastData {
   type: 'success' | 'error';
 }
 
+/** Cached session: wallet + encryption keypair. */
+export interface Session {
+  wallet: { address: string; pk: string };
+  keypair: { pk: string; sk: string };
+}
+
 // Extend Window interface for ethereum
 declare global {
   interface Window {

@@ -29,7 +29,6 @@ function App() {
     reconnectCachedWallet,
     disconnect,
     addEmail,
-    markAsRead,
   } = useWallet(showToast);
 
   // UI state
@@ -44,7 +43,6 @@ function App() {
   // Handle email click
   const handleEmailClick = (email: Email) => {
     setSelectedEmail(email);
-    markAsRead(email.id);
   };
 
   // Handle reply: set recipient and open compose modal

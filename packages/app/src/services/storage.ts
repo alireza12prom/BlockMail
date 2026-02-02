@@ -5,7 +5,7 @@
 
 const PREFIX = 'blockmail_';
 
-type Namespace = 'keypair' | 'cached_wallets' | 'disconnected';
+type Namespace = 'keypair' | 'disconnected' | 'sessions';
 
 export class StorageService {
   get(namespace: Namespace, key: string): string | null {

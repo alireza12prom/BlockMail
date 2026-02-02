@@ -1,38 +1,42 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
-import { Email } from '../types';
+import { Email, Session } from '../types';
 import { CONTRACT_ABI, CONTRACT_ADDRESS, KEY_REGISTRY_ABI, KEY_REGISTRY_ADDRESS, RPC_URL } from '../config/constants';
 import { EmailService, KeyRegistryService , storage} from '../services';
 
-const MAX_CACHED_WALLETS = 3;
+const MAX_CACHED_SESSIONS = 3;
 
-function getCachedWalletsList(): { address: string; privateKey: string }[] {
-  const raw = storage.get('cached_wallets', 'list');
-  if (!raw) {
-    const legacy = storage.get('cached_wallets', 'legacy');
-    if (legacy) {
-      try {
-        const one = JSON.parse(legacy) as { address?: string; privateKey?: string };
-        if (one?.address && one?.privateKey) {
-          const list = [{ address: one.address, privateKey: one.privateKey }];
-          storage.set('cached_wallets', 'list', JSON.stringify(list));
-          storage.del('cached_wallets', 'legacy');
-          return list;
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return [];
-  }
-
+function getCachedSessionsList(): Session[] {
+  const raw = storage.get('sessions', 'list');
+  if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? 
-      parsed.filter((w: unknown) => w && typeof w === 'object' && 'address' in w && 'privateKey' in w) 
-      : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (s: unknown): s is Session =>
+        s != null &&
+        typeof s === 'object' &&
+        'wallet' in s &&
+        typeof (s as Session).wallet === 'object' &&
+        typeof (s as Session).wallet?.address === 'string' &&
+        typeof (s as Session).wallet?.pk === 'string' &&
+        'keypair' in s &&
+        typeof (s as Session).keypair === 'object' &&
+        typeof (s as Session).keypair?.pk === 'string' &&
+        typeof (s as Session).keypair?.sk === 'string'
+    );
   } catch {
     return [];
+  }
+}
+
+function writeKeypairFromSession(address: string, session: Session): void {
+  try {
+    const pk = JSON.parse(session.keypair.pk) as number[];
+    const sk = JSON.parse(session.keypair.sk) as number[];
+    storage.set('keypair', address, JSON.stringify({ pk, sk }));
+  } catch {
+    // ignore
   }
 }
 
@@ -64,7 +68,6 @@ interface UseWalletReturn {
   reconnectCachedWallet: (address: string) => Promise<void>;
   disconnect: () => void;
   addEmail: (email: Email) => void;
-  markAsRead: (emailId: string) => void;
   emailService: EmailService | null;
   keyRegistryService: KeyRegistryService | null;
 }
@@ -82,8 +85,8 @@ export function useWallet(
   const [keyRegistryService, setKeyRegistryService] = useState<KeyRegistryService | null>(null);
   const [emailService, setEmailService] = useState<EmailService | null>(null);
   const [cachedWallets, setCachedWallets] = useState<{ address: string }[]>(() => {
-    const list = getCachedWalletsList();
-    return list.map((w) => ({ address: w.address })).slice(0, MAX_CACHED_WALLETS);
+    const list = getCachedSessionsList();
+    return list.map((s) => ({ address: s.wallet.address })).slice(0, MAX_CACHED_SESSIONS);
   });
   const hasRestoredRef = useRef(false);
 
@@ -114,23 +117,31 @@ export function useWallet(
         setKeyRegistryService(keyRegSvc);
         setEmailService(emailSvc);
 
-        // Keep last 3 connected wallets (most recent first)
-        try {
-          let list = getCachedWalletsList();
-          list = list.filter((w) => w.address.toLowerCase() !== address.toLowerCase());
-          list.unshift({ address, privateKey: wallet.privateKey });
-          list = list.slice(0, MAX_CACHED_WALLETS);
-          storage.set('cached_wallets', 'list', JSON.stringify(list));
-          setCachedWallets(list.map((w) => ({ address: w.address })));
-          storage.del('disconnected', 'key'); // allow auto-restore on next load
-        } catch {
-          // ignore storage errors
-        }
-
         showToast('Wallet connected', 'success');
 
         if (keyRegSvc) {
           await keyRegSvc.init(address);
+        }
+
+        // Cache session (wallet + keypair) under key "sessions"
+        try {
+          const keypairRaw = storage.get('keypair', address);
+          if (keypairRaw) {
+            const { pk, sk } = JSON.parse(keypairRaw) as { pk: number[]; sk: number[] };
+            const session: Session = {
+              wallet: { address, pk: wallet.privateKey },
+              keypair: { pk: JSON.stringify(pk), sk: JSON.stringify(sk) },
+            };
+            let list = getCachedSessionsList();
+            list = list.filter((s) => s.wallet.address.toLowerCase() !== address.toLowerCase());
+            list.unshift(session);
+            list = list.slice(0, MAX_CACHED_SESSIONS);
+            storage.set('sessions', 'list', JSON.stringify(list));
+            setCachedWallets(list.map((s) => ({ address: s.wallet.address })));
+          }
+          storage.del('disconnected', 'key');
+        } catch {
+          // ignore storage errors
         }
       } catch (err) {
         console.error('Connection failed:', err);
@@ -140,33 +151,35 @@ export function useWallet(
     [showToast]
   );
 
-  // Restore cached wallet on mount only if user did not explicitly disconnect (so reload after disconnect stays disconnected)
+  // Restore cached session on mount only if user did not explicitly disconnect
   useEffect(() => {
     if (hasRestoredRef.current) return;
     hasRestoredRef.current = true;
 
     if (storage.get('disconnected', 'key') === 'true') return;
 
-    const list = getCachedWalletsList();
+    const list = getCachedSessionsList();
     if (list.length === 0) return;
 
     const first = list[0];
-    if (!first?.privateKey) return;
+    if (!first?.wallet?.pk) return;
 
+    writeKeypairFromSession(first.wallet.address, first);
     setIsReconnecting(true);
-    const wallet = new ethers.Wallet(first.privateKey);
+    const wallet = new ethers.Wallet(first.wallet.pk);
     connectWithWallet(wallet).finally(() => setIsReconnecting(false));
   }, [connectWithWallet]);
 
-  // Reconnect using a cached wallet by address
+  // Reconnect using a cached session by address
   const reconnectCachedWallet = useCallback(
     async (address: string) => {
-      const list = getCachedWalletsList();
-      const entry = list.find((w) => w.address.toLowerCase() === address.toLowerCase());
-      if (!entry?.privateKey) return;
+      const list = getCachedSessionsList();
+      const session = list.find((s) => s.wallet.address.toLowerCase() === address.toLowerCase());
+      if (!session?.wallet?.pk) return;
+      writeKeypairFromSession(session.wallet.address, session);
       setIsReconnecting(true);
       try {
-        const wallet = new ethers.Wallet(entry.privateKey);
+        const wallet = new ethers.Wallet(session.wallet.pk);
         await connectWithWallet(wallet);
       } finally {
         setIsReconnecting(false);
@@ -191,16 +204,8 @@ export function useWallet(
   }, [contract]);
 
   // Add email
-
   const addEmail = useCallback((email: Email) => {
     setEmails(prev => [email, ...prev]);
-  }, []);
-
-  // Mark email as read
-  const markAsRead = useCallback((emailId: string) => {
-    setEmails(prev =>
-      prev.map(e => e.id === emailId ? { ...e, read: true } : e)
-    );
   }, []);
 
   return {
@@ -216,7 +221,6 @@ export function useWallet(
     reconnectCachedWallet,
     disconnect,
     addEmail,
-    markAsRead,
     emailService,
     keyRegistryService,
   };
