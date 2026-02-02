@@ -144,10 +144,12 @@ function EmailItem({ email, onClick }: EmailItemProps) {
             {email.direction === 'sent' ? shortenAddress(email.to) : shortenAddress(email.from)}
           </span>
         </div>
-        <span className="text-xs text-slate-500">{formatTime(email.timestamp)}</span>
+        <span className="text-xs text-slate-500">At: {formatTime(email.timestamp)}</span>
       </div>
 
-      <div className="text-sm text-slate-400 font-medium mb-1">{email.subject}</div>
+      {email.direction !== 'sent' && (
+        <div className="text-sm text-slate-400 font-medium mb-1">{email.subject}</div>
+      )}
       <div className="text-xs text-slate-500 truncate">{email.body}</div>
     </div>
   );

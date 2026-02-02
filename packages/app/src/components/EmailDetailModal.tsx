@@ -30,8 +30,9 @@ export function EmailDetailModal({ email, onClose, onReply }: EmailDetailModalPr
               <span className="text-slate-500 w-12">To:</span>
               <span className="address">{email.to}</span>
             </div>
-            <div className="text-xs text-slate-500 mt-2">
-              {email.timestamp.toLocaleString()}
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-slate-500 w-12">At:</span>
+              <span className="address">{email.timestamp.toLocaleString()}</span>
             </div>
           </div>
         </div>
