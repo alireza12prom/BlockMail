@@ -8,6 +8,12 @@ if (squirrelStartup) {
   app.quit();
 }
 
+// Fix GPU SharedImageManager errors
+// These errors are harmless but can be suppressed with these flags
+app.commandLine.appendSwitch('disable-gpu-sandbox');
+app.commandLine.appendSwitch('disable-software-rasterizer');
+app.commandLine.appendSwitch('disable-features', 'UseChromeOSDirectVideoDecoder');
+
 const createWindow = () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
